@@ -47,7 +47,7 @@ def read_root():
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
     # กำหนด Model ตรงนี้แทน (Hardcode ชื่อที่คิดว่าชัวร์สุดไปก่อน)
     # ถ้าอันนี้พัง เราจะไปดูรายชื่อใน /models แล้วค่อยมาแก้
-    target_model_name = 'gemini-1.5-flash-001' 
+    target_model_name = 'gemini-2.5-flash'
     
     global model
     model = genai.GenerativeModel(target_model_name)
