@@ -59,7 +59,6 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
         return {"result": response.text}
 
     except Exception as e:
-        # 🔥 นี่คือจุดสำคัญ! สั่งให้มันปริ้น Error ออกมาดู
-        print("❌ เกิดข้อผิดพลาด:")
+        print("❌ เกิดข้อผิดพลาด (Traceback):") # <--- ต้องมีบรรทัดนี้
         traceback.print_exc() 
         raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
