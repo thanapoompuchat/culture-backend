@@ -1,24 +1,27 @@
-# main.py
+# main.py (แบบ Debug)
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+import traceback # เพิ่มตัวนี้มาช่วยดู Error
 
-# โหลด API Key จากไฟล์ .env (ความปลอดภัยระดับ Server)
 load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# ตั้งค่า AI
+# --- เช็ก Key ตั้งแต่เริ่ม ---
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    print("❌ CRITICAL ERROR: ไม่เจอ GOOGLE_API_KEY ใน Environment Variables!")
+
 genai.configure(api_key=GOOGLE_API_KEY)
+# ลองใช้ model นี้ดู (เสถียรกว่าในบางโซน)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = FastAPI()
 
-# เปิด CORS (อนุญาตให้ Figma ยิงเข้ามาได้)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # ของจริงควรระบุ domain แต่ figma plugin ใช้ * ไปก่อนได้
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,15 +31,14 @@ def read_root():
     return {"status": "Server is running! 🚀"}
 
 @app.post("/analyze")
-async def analyze_ui(
-    file: UploadFile = File(...), 
-    country: str = "General", 
-    context: str = "App"
-):
+async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
+    print(f"📥 กำลังรับไฟล์... Country: {country}, Context: {context}")
+    
     try:
-        # 1. อ่านไฟล์รูปที่ส่งมา
+        # 1. อ่านไฟล์
         contents = await file.read()
-        
+        print(f"✅ อ่านไฟล์สำเร็จ ขนาด: {len(contents)} bytes")
+
         # 2. เตรียม Prompt
         prompt = f"""
         Act as a UX Expert. Analyze this image for {country} culture in {context} context.
@@ -46,16 +48,18 @@ async def analyze_ui(
         - Suggestions
         """
         
-        # 3. ส่งให้ Gemini (Server เป็นคนยิง AI เอง)
+        # 3. ส่ง Gemini
+        print("🤖 กำลังส่งให้ Gemini...")
         response = model.generate_content([
             {'mime_type': 'image/jpeg', 'data': contents},
             prompt
         ])
+        print("✅ Gemini ตอบกลับมาแล้ว!")
         
-        # 4. ส่งคำตอบกลับไปให้ Figma
         return {"result": response.text}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# วิธีรัน (ในเครื่อง): uvicorn main:app --reload
+        # 🔥 นี่คือจุดสำคัญ! สั่งให้มันปริ้น Error ออกมาดู
+        print("❌ เกิดข้อผิดพลาด:")
+        traceback.print_exc() 
+        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
