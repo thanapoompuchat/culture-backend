@@ -1,21 +1,22 @@
-# main.py (แบบ Debug)
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
-import traceback # เพิ่มตัวนี้มาช่วยดู Error
+import traceback
 
 load_dotenv()
 
-# --- เช็ก Key ตั้งแต่เริ่ม ---
+# Check Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
-    print("❌ CRITICAL ERROR: ไม่เจอ GOOGLE_API_KEY ใน Environment Variables!")
+    print("❌ ERROR: No API Key found!")
 
 genai.configure(api_key=GOOGLE_API_KEY)
-# ลองใช้ model นี้ดู (เสถียรกว่าในบางโซน)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+# --- 🔥 ส่วนที่เพิ่มใหม่: เลือก Model อัตโนมัติ ---
+# เราจะตั้งค่า Model เป็นตัวแปรไว้ก่อน แล้วค่อยกำหนดค่า
+model = None 
 
 app = FastAPI()
 
@@ -26,39 +27,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- 🔥 ส่วนที่เพิ่มใหม่: Endpoint เช็กรายชื่อ Model ---
+@app.get("/models")
+def list_available_models():
+    try:
+        available = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available.append(m.name)
+        return {"available_models": available}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/")
 def read_root():
-    return {"status": "Server is running! 🚀"}
+    return {"status": "Server is running! 🚀 Go to /models to see available AI."}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    print(f"📥 กำลังรับไฟล์... Country: {country}, Context: {context}")
+    # กำหนด Model ตรงนี้แทน (Hardcode ชื่อที่คิดว่าชัวร์สุดไปก่อน)
+    # ถ้าอันนี้พัง เราจะไปดูรายชื่อใน /models แล้วค่อยมาแก้
+    target_model_name = 'gemini-1.5-flash-001' 
+    
+    global model
+    model = genai.GenerativeModel(target_model_name)
+
+    print(f"📥 Receiving file... Model: {target_model_name}")
     
     try:
-        # 1. อ่านไฟล์
         contents = await file.read()
-        print(f"✅ อ่านไฟล์สำเร็จ ขนาด: {len(contents)} bytes")
-
-        # 2. เตรียม Prompt
         prompt = f"""
         Act as a UX Expert. Analyze this image for {country} culture in {context} context.
         Return HTML output with:
         - Score (0-100)
-        - Critical Issues (Red flags)
+        - Critical Issues
         - Suggestions
         """
         
-        # 3. ส่ง Gemini
-        print("🤖 กำลังส่งให้ Gemini...")
+        print("🤖 Sending to Gemini...")
         response = model.generate_content([
             {'mime_type': 'image/jpeg', 'data': contents},
             prompt
         ])
-        print("✅ Gemini ตอบกลับมาแล้ว!")
         
         return {"result": response.text}
 
     except Exception as e:
-        print("❌ เกิดข้อผิดพลาด (Traceback):") # <--- ต้องมีบรรทัดนี้
+        print("❌ Error:")
         traceback.print_exc() 
-        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
+        # ส่ง Error กลับไปบอก Figma ด้วย จะได้ไม่ต้องดู Log บ่อยๆ
+        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
