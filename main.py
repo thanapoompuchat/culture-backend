@@ -33,8 +33,9 @@ def read_root():
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ✅ ใช้ตัวนี้ (เพราะบัญชีคุณมีตัวนี้ชัวร์ๆ)
-    target_model_name = 'gemini-2.0-flash'
+    # ✅ ใช้ชื่อนี้ครับ (Google จะเลือกตัวที่ใช้ได้ให้เองอัตโนมัติ)
+    # จากลิสต์ของคุณมีชื่อนี้แน่นอน: models/gemini-flash-latest
+    target_model_name = 'gemini-flash-latest'
     
     print(f"📥 [Analyze] Receiving file... Model: {target_model_name}")
     
@@ -68,13 +69,14 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
     except Exception as e:
         print("❌ Analyze Error:")
         traceback.print_exc() 
+        # ส่ง Error กลับไปบอก Figma ให้ชัดเจน
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
 
 # --- Endpoint: Fix ---
 @app.post("/fix")
 async def fix_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ✅ ใช้ตัวเดียวกัน
-    target_model_name = 'gemini-2.0-flash'
+    # ✅ ใช้ชื่อเดียวกัน
+    target_model_name = 'gemini-flash-latest'
     
     print(f"🎨 [Fix] Generating SVG Design for {country}...")
 
