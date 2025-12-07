@@ -1,53 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-import traceback
-
-load_dotenv()
-
-# Check Key
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    print("❌ ERROR: No API Key found!")
-
-genai.configure(api_key=GOOGLE_API_KEY)
-
-# --- 🔥 ส่วนที่เพิ่มใหม่: เลือก Model อัตโนมัติ ---
-# เราจะตั้งค่า Model เป็นตัวแปรไว้ก่อน แล้วค่อยกำหนดค่า
-model = None 
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- 🔥 ส่วนที่เพิ่มใหม่: Endpoint เช็กรายชื่อ Model ---
-@app.get("/models")
-def list_available_models():
-    try:
-        available = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available.append(m.name)
-        return {"available_models": available}
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.get("/")
-def read_root():
-    return {"status": "Server is running! 🚀 Go to /models to see available AI."}
+# --- main.py (แก้เฉพาะฟังก์ชัน analyze_ui) ---
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # กำหนด Model ตรงนี้แทน (Hardcode ชื่อที่คิดว่าชัวร์สุดไปก่อน)
-    # ถ้าอันนี้พัง เราจะไปดูรายชื่อใน /models แล้วค่อยมาแก้
-    target_model_name = 'gemini-2.5-flash'
+    # ใช้ Model ตัวล่าสุดที่เราเทสผ่านเมื่อวาน
+    target_model_name = 'gemini-2.5-flash' 
     
     global model
     model = genai.GenerativeModel(target_model_name)
@@ -56,12 +12,49 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
     
     try:
         contents = await file.read()
+        
+        # 🔥🔥🔥 PROMPT ใหม่: สั่งให้โหด กระชับ และจัด Format HTML มาเลย 🔥🔥🔥
         prompt = f"""
-        Act as a UX Expert. Analyze this image for {country} culture in {context} context.
-        Return HTML output with:
-        - Score (0-100)
-        - Critical Issues
-        - Suggestions
+        Act as a Strict UX & Cultural Audit AI. 
+        Analyze this UI screenshot for target audience: {country}.
+        Context: {context}.
+
+        Your goal: Identify cultural mistakes and suggest fix immediately.
+        
+        RULES:
+        1. Be extremely concise. No fluffy introduction.
+        2. Use Thai language for output (ตอบเป็นภาษาไทย).
+        3. Output MUST be raw HTML format (without ```html wrappers).
+        4. Use specific CSS classes: <div class='score'>, <ul class='issues'>, <li class='fix'>.
+
+        STRUCTURE THE RESPONSE LIKE THIS:
+        
+        <div class="score-container">
+            <div class="score-label">Cultural Fit Score</div>
+            <div class="score-value">[Score]/100</div>
+        </div>
+
+        <div class="section">
+            <h3>🚨 สิ่งที่ต้องรีบแก้ (Critical)</h3>
+            <ul class="issues">
+                <li>
+                    <strong>[Point 1]</strong>: [Why it is bad in {country}]
+                    <div class="fix">💡 แก้โดย: [Specific Action]</div>
+                </li>
+                <li>
+                    <strong>[Point 2]</strong>: [Why it is bad]
+                    <div class="fix">💡 แก้โดย: [Specific Action]</div>
+                </li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h3>✅ สิ่งที่ทำดีแล้ว (Keep it)</h3>
+            <ul class="good">
+                <li>[Point 1]</li>
+                <li>[Point 2]</li>
+            </ul>
+        </div>
         """
         
         print("🤖 Sending to Gemini...")
@@ -70,10 +63,12 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
             prompt
         ])
         
-        return {"result": response.text}
+        # ล้าง Code block (เผื่อ AI เผลอใส่ ```html มา)
+        clean_text = response.text.replace("```html", "").replace("```", "")
+        
+        return {"result": clean_text}
 
     except Exception as e:
         print("❌ Error:")
         traceback.print_exc() 
-        # ส่ง Error กลับไปบอก Figma ด้วย จะได้ไม่ต้องดู Log บ่อยๆ
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
