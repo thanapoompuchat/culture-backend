@@ -1,3 +1,4 @@
+# แก้แล้วนะโว้ยยย v2
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
