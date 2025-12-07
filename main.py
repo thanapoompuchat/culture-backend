@@ -45,4 +45,4 @@ async def fix_ui(file: UploadFile = File(...), country: str = "General", context
         return {"svg": response.text.replace("```svg", "").replace("```xml", "").replace("```", "")}
     except Exception as e:
         print("❌ Error:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) 
