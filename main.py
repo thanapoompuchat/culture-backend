@@ -5,21 +5,21 @@ import os
 from dotenv import load_dotenv
 import traceback
 
-# โหลด Environment Variables
+# 1. โหลด Environment Variables
 load_dotenv()
 
-# ตรวจสอบ API Key
+# 2. ตรวจสอบ API Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
     print("❌ ERROR: No API Key found in environment variables!")
 
-# ตั้งค่า AI
+# 3. ตั้งค่า AI
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# ตั้งค่า FastAPI
+# 4. ตั้งค่า App
 app = FastAPI()
 
-# เปิดให้ Figma เข้าถึงได้ (CORS)
+# 5. เปิด CORS (ให้ Figma เข้าถึงได้)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,12 +27,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Endpoint เช็กสถานะ Server
+# --- Endpoint 1: เช็กสถานะ ---
 @app.get("/")
 def read_root():
     return {"status": "Server is running! 🚀"}
 
-# Endpoint เช็กรายชื่อ Model (เผื่อไว้ debug)
+# --- Endpoint 2: เช็ก Model ---
 @app.get("/models")
 def list_available_models():
     try:
@@ -44,25 +44,19 @@ def list_available_models():
     except Exception as e:
         return {"error": str(e)}
 
-# Endpoint หลักสำหรับวิเคราะห์ UI
+# --- Endpoint 3: วิเคราะห์ (Analyze) ---
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ใช้ Model ตัวล่าสุดที่เช็กมา
+    # ใช้ Model ตัวล่าสุด
     target_model_name = 'gemini-2.5-flash'
     
-    # ถ้า 2.5 ยังมีปัญหา ให้ลองเปลี่ยนกลับเป็น 'gemini-1.5-flash-001'
-    # target_model_name = 'gemini-1.5-flash-001'
-
-    print(f"📥 Receiving file... Model: {target_model_name}")
+    print(f"📥 [Analyze] Receiving file... Model: {target_model_name}")
     
     try:
-        # สร้าง Model Object
         model = genai.GenerativeModel(target_model_name)
-
-        # อ่านไฟล์รูป
         contents = await file.read()
         
-        # PROMPT: สั่งให้ตอบเป็น HTML
+        # PROMPT: HTML Output
         prompt = f"""
         Act as a Strict UX & Cultural Audit AI. 
         Analyze this UI screenshot for target audience: {country}.
@@ -71,54 +65,89 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
         Your goal: Identify cultural mistakes and suggest fix immediately.
         
         RULES:
-        1. Be extremely concise. No fluffy introduction.
-        2. Use Thai language for output (ตอบเป็นภาษาไทย).
+        1. Be extremely concise.
+        2. Use Thai language for output.
         3. Output MUST be raw HTML format (without ```html wrappers).
         4. Use specific CSS classes: <div class='score'>, <ul class='issues'>, <li class='fix'>.
 
-        STRUCTURE THE RESPONSE EXACTLY LIKE THIS:
-        
+        STRUCTURE:
         <div class="score-container">
             <div class="score-label">Cultural Fit Score</div>
             <div class="score-value">[Score]/100</div>
         </div>
-
         <div class="section">
             <h3>🚨 สิ่งที่ต้องรีบแก้ (Critical)</h3>
             <ul class="issues">
                 <li>
-                    <strong>[Point 1]</strong>: [Why it is bad in {country}]
-                    <div class="fix">💡 แก้โดย: [Specific Action]</div>
-                </li>
-                <li>
-                    <strong>[Point 2]</strong>: [Why it is bad]
+                    <strong>[Point 1]</strong>: [Why it is bad]
                     <div class="fix">💡 แก้โดย: [Specific Action]</div>
                 </li>
             </ul>
         </div>
-
         <div class="section">
             <h3>✅ สิ่งที่ทำดีแล้ว (Keep it)</h3>
             <ul class="good">
                 <li>[Point 1]</li>
-                <li>[Point 2]</li>
             </ul>
         </div>
         """
         
-        print("🤖 Sending to Gemini...")
         response = model.generate_content([
             {'mime_type': 'image/jpeg', 'data': contents},
             prompt
         ])
         
-        # ล้าง Code block ที่ AI อาจเผลอใส่มา
         clean_text = response.text.replace("```html", "").replace("```", "")
-        
-        print("✅ Success!")
         return {"result": clean_text}
 
     except Exception as e:
-        print("❌ Error:")
+        print("❌ Analyze Error:")
         traceback.print_exc() 
+        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+
+# --- Endpoint 4: แก้ไข UI (Fix / SVG) ---
+@app.post("/fix")
+async def fix_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
+    # ใช้ Model ตัวเดิม
+    target_model_name = 'gemini-2.5-flash'
+    
+    print(f"🎨 [Fix] Generating SVG Design for {country}...")
+
+    try:
+        model = genai.GenerativeModel(target_model_name)
+        contents = await file.read()
+        
+        # PROMPT: SVG Output
+        prompt = f"""
+        Act as a UI Designer. 
+        Redesign this UI screenshot to fit {country} culture perfectly.
+        Context: {context}.
+        
+        TASK:
+        Generate a High-Fidelity Wireframe using SVG Code.
+        
+        REQUIREMENTS:
+        1. Use colors suitable for {country}.
+        2. Fix layout issues found in the image.
+        3. Use <rect>, <text>, <circle>, <g> tags.
+        4. Make it look modern and clean.
+        5. Output ONLY raw SVG code (start with <svg> end with </svg>).
+        6. Width: 375px, Height: 812px (Mobile size).
+        7. Do not include markdown code blocks.
+        """
+        
+        response = model.generate_content([
+            {'mime_type': 'image/jpeg', 'data': contents},
+            prompt
+        ])
+        
+        # ล้าง Code block
+        svg_code = response.text.replace("```svg", "").replace("```xml", "").replace("```", "")
+        
+        print("✅ SVG Generated!")
+        return {"svg": svg_code}
+
+    except Exception as e:
+        print("❌ Fix Error:")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
