@@ -30,10 +30,10 @@ app.add_middleware(
 def read_root():
     return {"status": "Server is running! 🚀"}
 
-# --- Endpoint: Analyze (ใช้ Gemini 2.0 Flash) ---
+# --- Endpoint: Analyze (ใช้ Gemini 2.0 Flash ตัวจริง) ---
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ✅ เปลี่ยนมาใช้ตัวนี้ครับ (มีในลิสต์ของคุณ และเสถียรกว่า 2.5)
+    # ✅ เปลี่ยนมาใช้ตัวนี้ครับ (มีในลิสต์ของคุณแน่นอน)
     target_model_name = 'gemini-2.0-flash'
     
     print(f"📥 [Analyze] Receiving file... Model: {target_model_name}")
@@ -72,7 +72,7 @@ async def analyze_ui(file: UploadFile = File(...), country: str = "General", con
         traceback.print_exc() 
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
 
-# --- Endpoint: Fix (ใช้ Gemini 2.0 Flash) ---
+# --- Endpoint: Fix (ใช้ Gemini 2.0 Flash ตัวจริง) ---
 @app.post("/fix")
 async def fix_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
     # ✅ ใช้ตัวเดียวกัน
