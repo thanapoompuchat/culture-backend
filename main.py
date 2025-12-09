@@ -1,98 +1,93 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 import traceback
 
-# 1. โหลด Environment Variables
 load_dotenv()
-
-# 2. ตรวจสอบ API Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    print("❌ ERROR: No API Key found!")
-
-# 3. ตั้งค่า AI
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# 4. ตั้งค่า App
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
     return {"status": "Server is running! 🚀"}
 
-# --- Endpoint: Analyze ---
+# --- Endpoint: Analyze (เหมือนเดิม) ---
 @app.post("/analyze")
-async def analyze_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ✅ ใช้ชื่อนี้ครับ (Google จะเลือกตัวที่ใช้ได้ให้เองอัตโนมัติ)
-    # จากลิสต์ของคุณมีชื่อนี้แน่นอน: models/gemini-flash-latest
-    target_model_name = 'gemini-flash-latest'
-    
-    print(f"📥 [Analyze] Receiving file... Model: {target_model_name}")
+async def analyze_ui(
+    file: UploadFile = File(...), 
+    country: str = Form(...), 
+    context: str = Form(...)
+):
+    target_model_name = 'gemini-flash-latest' # หรือ 'gemini-2.0-flash' ถ้าใช้ได้
+    print(f"📥 Analyze for {country}")
     
     try:
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
-        
         prompt = f"""
-        Act as a Strict UX & Cultural Audit AI. 
-        Analyze this UI screenshot for target audience: {country}.
+        Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-
-        RULES:
-        1. Answer in Thai (ภาษาไทย).
-        2. Output RAW HTML only.
-        3. Structure:
-           <div class="score-container"><div class="score-label">คะแนนความเหมาะสม</div><div class="score-value">[Score]/100</div></div>
-           <div class="section"><h3>🚨 สิ่งที่ต้องปรับปรุง (Critical)</h3><ul class="issues"><li><strong>[จุดที่ผิด]</strong>: [ทำไมถึงผิด]<div class="fix">💡 แก้ไข: [วิธีแก้]</div></li></ul></div>
-           <div class="section"><h3>✅ สิ่งที่ทำได้ดี (Good)</h3><ul class="good"><li>[จุดที่ดี]</li></ul></div>
+        Output raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
         """
-        
-        response = model.generate_content([
-            {'mime_type': 'image/jpeg', 'data': contents},
-            prompt
-        ])
-        
-        clean_text = response.text.replace("```html", "").replace("```", "")
-        print("✅ Analyze Success!")
-        return {"result": clean_text}
-
+        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
+        return {"result": response.text.replace("```html", "").replace("```", "")}
     except Exception as e:
-        print("❌ Analyze Error:")
-        traceback.print_exc() 
-        # ส่ง Error กลับไปบอก Figma ให้ชัดเจน
-        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+        print("❌ Error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --- Endpoint: Fix ---
+# --- Endpoint: Fix (อัปเกรดใหม่!) ---
 @app.post("/fix")
-async def fix_ui(file: UploadFile = File(...), country: str = "General", context: str = "App"):
-    # ✅ ใช้ชื่อเดียวกัน
+async def fix_ui(
+    file: UploadFile = File(...), 
+    country: str = Form(...), 
+    context: str = Form(...),
+    description: str = Form(""), # รับ Description
+    width: str = Form("375"),    # รับขนาด
+    height: str = Form("812"),
+    keep_layout: str = Form("false") # รับ Checkbox
+):
     target_model_name = 'gemini-flash-latest'
-    
-    print(f"🎨 [Fix] Generating SVG Design for {country}...")
+    print(f"🎨 Generating SVG for {country}. Size: {width}x{height}. Keep Layout: {keep_layout}")
 
     try:
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
         
+        # 🔥 สร้าง Prompt แบบ Dynamic ตามเงื่อนไข
+        layout_instruction = ""
+        if keep_layout == "true":
+            layout_instruction = "STRICTLY follow the original layout structure. Do not move main elements. Only adjust colors, spacing, and typography to fit the culture."
+        else:
+            layout_instruction = "You can rearrange the layout to be more modern and user-friendly, while keeping the main content."
+
         prompt = f"""
-        Act as a UI Designer. Redesign this UI for {country} culture.
-        Context: {context}.
+        Act as a Professional UI Designer.
+        Redesign this UI for target audience: {country}.
         
-        TASK: Generate SVG Code for a mobile UI (375x812).
-        REQUIREMENTS:
-        1. Clean, Modern, Cultural fit colors.
-        2. Output ONLY raw SVG code. NO markdown.
-        3. Start with <svg ...> and end with </svg>.
+        INPUT DETAILS:
+        - Context: {context}
+        - User Description: "{description}"
+        - Screen Size: {width}x{height} pixels
+        
+        YOUR TASK:
+        Generate a High-Fidelity Wireframe using SVG Code.
+        
+        DESIGN RULES:
+        1. {layout_instruction}
+        2. Use a color palette that perfectly matches {country} culture.
+        3. Use <rect> for backgrounds/cards, <text> for labels, <circle> for avatars/icons.
+        4. Make sure the SVG viewBox is "0 0 {width} {height}".
+        5. Ensure all text is readable.
+        
+        OUTPUT FORMAT:
+        - Return ONLY raw SVG code.
+        - Start with <svg ...> and end with </svg>.
+        - Do NOT use markdown code blocks.
         """
         
         response = model.generate_content([
@@ -101,11 +96,8 @@ async def fix_ui(file: UploadFile = File(...), country: str = "General", context
         ])
         
         svg_code = response.text.replace("```svg", "").replace("```xml", "").replace("```", "")
-        
-        print("✅ Fix SVG Success!")
         return {"svg": svg_code}
 
     except Exception as e:
-        print("❌ Fix Error:")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+        print("❌ Error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
