@@ -16,16 +16,17 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "Server is running! 🚀"}
 
-# --- Endpoint: Analyze (เหมือนเดิม) ---
+# --- Endpoint: Analyze ---
 @app.post("/analyze")
 async def analyze_ui(
     file: UploadFile = File(...), 
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    target_model_name = 'gemini-flash-latest' # หรือ 'gemini-2.0-flash' ถ้าใช้ได้
-    print(f"📥 Analyze for {country}")
+    # ✅ ลองใช้ตัว Lite ดูครับ (เผื่อโควต้ายังว่าง)
+    target_model_name = 'gemini-2.0-flash-lite-preview-02-05' 
     
+    print(f"📥 Analyze using {target_model_name}")
     try:
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
@@ -40,30 +41,31 @@ async def analyze_ui(
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Endpoint: Fix (อัปเกรดใหม่!) ---
+# --- Endpoint: Fix ---
 @app.post("/fix")
 async def fix_ui(
     file: UploadFile = File(...), 
     country: str = Form(...), 
     context: str = Form(...),
-    description: str = Form(""), # รับ Description
-    width: str = Form("375"),    # รับขนาด
+    description: str = Form(""), 
+    width: str = Form("375"),    
     height: str = Form("812"),
-    keep_layout: str = Form("false") # รับ Checkbox
+    keep_layout: str = Form("false") 
 ):
-    target_model_name = 'gemini-flash-latest'
-    print(f"🎨 Generating SVG for {country}. Size: {width}x{height}. Keep Layout: {keep_layout}")
+    # ✅ ใช้ตัว Lite เหมือนกัน
+    target_model_name = 'gemini-2.0-flash-lite-preview-02-05'
+    
+    print(f"🎨 Generating SVG using {target_model_name}")
 
     try:
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
         
-        # 🔥 สร้าง Prompt แบบ Dynamic ตามเงื่อนไข
         layout_instruction = ""
         if keep_layout == "true":
-            layout_instruction = "STRICTLY follow the original layout structure. Do not move main elements. Only adjust colors, spacing, and typography to fit the culture."
+            layout_instruction = "STRICTLY follow the original layout structure. Do not move main elements."
         else:
-            layout_instruction = "You can rearrange the layout to be more modern and user-friendly, while keeping the main content."
+            layout_instruction = "You can rearrange the layout to be more modern."
 
         prompt = f"""
         Act as a Professional UI Designer.
@@ -80,14 +82,7 @@ async def fix_ui(
         DESIGN RULES:
         1. {layout_instruction}
         2. Use a color palette that perfectly matches {country} culture.
-        3. Use <rect> for backgrounds/cards, <text> for labels, <circle> for avatars/icons.
-        4. Make sure the SVG viewBox is "0 0 {width} {height}".
-        5. Ensure all text is readable.
-        
-        OUTPUT FORMAT:
-        - Return ONLY raw SVG code.
-        - Start with <svg ...> and end with </svg>.
-        - Do NOT use markdown code blocks.
+        3. Output ONLY raw SVG code. No markdown.
         """
         
         response = model.generate_content([
@@ -95,8 +90,7 @@ async def fix_ui(
             prompt
         ])
         
-        svg_code = response.text.replace("```svg", "").replace("```xml", "").replace("```", "")
-        return {"svg": svg_code}
+        return {"svg": response.text.replace("```svg", "").replace("```xml", "").replace("```", "")}
 
     except Exception as e:
         print("❌ Error:", e)
