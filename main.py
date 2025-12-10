@@ -23,8 +23,8 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    # ✅ ลองใช้ตัว Lite ดูครับ (เผื่อโควต้ายังว่าง)
-    target_model_name = 'gemini-2.0-flash-lite-preview-02-05' 
+    # ✅ กลับมาตายรังที่ตัวนี้ครับ (Key ใหม่ + ตัวนี้ = รอดชัวร์)
+    target_model_name = 'gemini-1.5-flash' 
     
     print(f"📥 Analyze using {target_model_name}")
     try:
@@ -52,8 +52,8 @@ async def fix_ui(
     height: str = Form("812"),
     keep_layout: str = Form("false") 
 ):
-    # ✅ ใช้ตัว Lite เหมือนกัน
-    target_model_name = 'gemini-2.0-flash-lite-preview-02-05'
+    # ✅ กลับมาใช้ตัวนี้
+    target_model_name = 'gemini-1.5-flash'
     
     print(f"🎨 Generating SVG using {target_model_name}")
 
