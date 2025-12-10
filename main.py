@@ -16,18 +16,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "Server is running! 🚀"}
 
-# --- ✅ ฟังก์ชันเช็กชื่อ Model (เผื่อต้องใช้) ---
-@app.get("/models")
-def list_models():
-    try:
-        models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                models.append(m.name)
-        return {"models": models}
-    except Exception as e:
-        return {"error": str(e)}
-
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
 async def analyze_ui(
@@ -35,8 +23,8 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    # ✅ แก้เป็นชื่อเต็มยศ (มี -001) เพื่อความชัวร์
-    target_model_name = 'gemini-1.5-flash-001' 
+    # ✅ ใช้ตัวนี้ครับ! (เห็นในรูปของคุณชัดเจนว่ามี)
+    target_model_name = 'gemini-2.5-flash' 
     
     print(f"📥 Analyze using {target_model_name}")
     try:
@@ -64,8 +52,8 @@ async def fix_ui(
     height: str = Form("812"),
     keep_layout: str = Form("false") 
 ):
-    # ✅ ใช้ชื่อเต็มเหมือนกัน
-    target_model_name = 'gemini-1.5-flash-001'
+    # ✅ ใช้ตัวนี้เหมือนกัน
+    target_model_name = 'gemini-2.5-flash'
     
     print(f"🎨 Generating SVG using {target_model_name}")
     try:
