@@ -16,6 +16,18 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "Server is running! 🚀"}
 
+# --- ✅ ฟังก์ชันเช็กชื่อ Model (เผื่อต้องใช้) ---
+@app.get("/models")
+def list_models():
+    try:
+        models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                models.append(m.name)
+        return {"models": models}
+    except Exception as e:
+        return {"error": str(e)}
+
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
 async def analyze_ui(
@@ -23,8 +35,8 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    # ✅ กลับมาตายรังที่ตัวนี้ครับ (Key ใหม่ + ตัวนี้ = รอดชัวร์)
-    target_model_name = 'gemini-1.5-flash' 
+    # ✅ แก้เป็นชื่อเต็มยศ (มี -001) เพื่อความชัวร์
+    target_model_name = 'gemini-1.5-flash-001' 
     
     print(f"📥 Analyze using {target_model_name}")
     try:
@@ -52,11 +64,10 @@ async def fix_ui(
     height: str = Form("812"),
     keep_layout: str = Form("false") 
 ):
-    # ✅ กลับมาใช้ตัวนี้
-    target_model_name = 'gemini-1.5-flash'
+    # ✅ ใช้ชื่อเต็มเหมือนกัน
+    target_model_name = 'gemini-1.5-flash-001'
     
     print(f"🎨 Generating SVG using {target_model_name}")
-
     try:
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
@@ -70,19 +81,9 @@ async def fix_ui(
         prompt = f"""
         Act as a Professional UI Designer.
         Redesign this UI for target audience: {country}.
-        
-        INPUT DETAILS:
-        - Context: {context}
-        - User Description: "{description}"
-        - Screen Size: {width}x{height} pixels
-        
-        YOUR TASK:
-        Generate a High-Fidelity Wireframe using SVG Code.
-        
-        DESIGN RULES:
-        1. {layout_instruction}
-        2. Use a color palette that perfectly matches {country} culture.
-        3. Output ONLY raw SVG code. No markdown.
+        INPUT DETAILS: Context: {context}, Desc: "{description}", Size: {width}x{height}
+        YOUR TASK: Generate SVG Code.
+        RULES: {layout_instruction}, Match {country} culture, Output ONLY SVG.
         """
         
         response = model.generate_content([
@@ -91,7 +92,6 @@ async def fix_ui(
         ])
         
         return {"svg": response.text.replace("```svg", "").replace("```xml", "").replace("```", "")}
-
     except Exception as e:
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
