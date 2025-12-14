@@ -23,34 +23,33 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    target_model_name = 'gemini-2.5-flash' # ใช้ตัวเดิมที่เวิร์ค
+    # ✅ เปลี่ยนมาใช้ตัวนี้ เร็ว + ยืดหยุ่นกว่า
+    target_model_name = 'gemini-2.0-flash-exp'
     
-    print(f"📥 Analyze using {target_model_name}")
+    print(f"📥 Analyze Request: {country} - {target_model_name}")
     try:
-        # 🔥 ปรับ Config ให้ตอบไวขึ้นและตรงประเด็น
-        generation_config = genai.types.GenerationConfig(
-            temperature=0.4, # กลางๆ สำหรับการวิเคราะห์
-            max_output_tokens=1000
-        )
-        
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
+        
         prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
         Output raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
-        Keep it concise.
+        IMPORTANT: Return ONLY the HTML code. Do not include markdown like ```html.
         """
-        response = model.generate_content(
-            [{'mime_type': 'image/jpeg', 'data': contents}, prompt],
-            generation_config=generation_config
-        )
-        return {"result": response.text.replace("```html", "").replace("```", "")}
+        
+        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
+        
+        # 🕵️‍♂️ Debug: ปริ้นท์คำตอบ AI ออกมาดูใน Log เลย
+        print(f"🤖 AI Response: {response.text[:100]}...") 
+        
+        clean_response = response.text.replace("```html", "").replace("```", "").strip()
+        return {"result": clean_response}
     except Exception as e:
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Endpoint: Fix (จูนใหม่!) ---
+# --- Endpoint: Fix ---
 @app.post("/fix")
 async def fix_ui(
     file: UploadFile = File(...), 
@@ -61,58 +60,51 @@ async def fix_ui(
     height: str = Form("812"),
     keep_layout: str = Form("false") 
 ):
-    target_model_name = 'gemini-2.5-flash'
+    # ✅ ใช้ตัว 2.0 Flash Exp เหมือนกัน
+    target_model_name = 'gemini-2.0-flash-exp'
     
-    print(f"🎨 Generating SVG using {target_model_name} (Low Temp)")
+    print(f"🎨 Fix Request: {target_model_name}")
     try:
-        # 🔥 ทีเด็ด: ลดความมั่ว (Temperature) ให้ AI นิ่งขึ้น
+        # 🔥 Config: บังคับให้ตอบแบบมั่นใจ ไม่มั่ว
         generation_config = genai.types.GenerationConfig(
-            temperature=0.2,       # ต่ำมาก = นิ่ง, คงเส้นคงวา, ไม่มั่ว
-            top_p=0.8,             # เลือกคำตอบที่ชัวร์เท่านั้น
-            top_k=40,
-            max_output_tokens=4000 # เผื่อ SVG ยาวๆ
+            temperature=0.3, 
+            max_output_tokens=8000
         )
 
         model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
         
-        # ปรับ Prompt ให้ดุขึ้น เรื่องตำแหน่ง
-        layout_instruction = ""
-        if keep_layout == "true":
-            layout_instruction = """
-            CRITICAL: PRESERVE THE EXACT LAYOUT STRUCTURE. 
-            - Do NOT move buttons, images, or text blocks. 
-            - Maintain relative positions exactly as seen in the image.
-            - Only update colors, fonts, and corner radius to match culture.
-            """
-        else:
-            layout_instruction = "Refine the layout to be cleaner but keep the main sections."
+        layout_instruction = "Maintain the main layout structure but update styles." if keep_layout == "true" else "You can modernize the layout."
 
         prompt = f"""
-        Act as a Professional Frontend Developer & UI Designer.
-        Recreate this UI as a Clean SVG Wireframe for {country}.
+        Act as a UI Designer. Generate an SVG wireframe for {country} culture.
+        Specs: {width}x{height}, Context: {context}, Desc: "{description}"
         
-        INPUT SPECS:
-        - Viewport: {width}x{height}
-        - Context: {context}
-        - User Desc: "{description}"
-        
-        STRICT RULES:
-        1. Output ONLY valid SVG code. No markdown text.
-        2. Set <svg width="{width}" height="{height}" viewBox="0 0 {width} {height}">.
+        CRITICAL RULES:
+        1. Output ONLY raw SVG code. NO markdown blocks (```svg). NO explanatory text.
+        2. Start immediately with <svg ...>
         3. {layout_instruction}
-        4. Use <rect> for backgrounds (fill screen width/height).
-        5. Use meaningful colors for {country} (e.g., Red/Gold for China, Minimal/Pastel for Japan).
-        6. Group elements logically (<g>).
-        
+        4. Make sure all text is visible.
         """
         
         response = model.generate_content(
             [{'mime_type': 'image/jpeg', 'data': contents}, prompt],
-            generation_config=generation_config # 👈 ยัด Config เข้าไป
+            generation_config=generation_config
         )
         
-        return {"svg": response.text.replace("```svg", "").replace("```xml", "").replace("```", "")}
+        # 🕵️‍♂️ Debug: เช็กว่า AI ส่ง SVG มาจริงไหม
+        print(f"🤖 AI SVG Response (First 100 chars): {response.text[:100]}")
+        
+        clean_svg = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
+        
+        # ถ้า AI เผลอพูดนำหน้า ให้ตัดทิ้ง (Hack fix)
+        if "<svg" in clean_svg:
+            clean_svg = clean_svg[clean_svg.find("<svg"):]
+        if "</svg>" in clean_svg:
+            clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
+
+        return {"svg": clean_svg}
+
     except Exception as e:
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
