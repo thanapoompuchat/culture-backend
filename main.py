@@ -8,15 +8,14 @@ import io
 
 load_dotenv()
 
-# ✅ ตั้งค่า SambaNova Client
-# (ใช้ Library OpenAI แต่ชี้ไปที่ Server ของ SambaNova)
+# ✅ ใช้ SambaNova Key เดิมได้เลย
 sambanova_api_key = os.environ.get("SAMBANOVA_API_KEY")
 if not sambanova_api_key:
-    print("⚠️ WARNING: SAMBANOVA_API_KEY is missing!")
+    print("⚠️ WARNING: SAMBANOVA_API_KEY is missing")
 
 client = OpenAI(
     api_key=sambanova_api_key,
-    base_url="https://api.sambanova.ai/v1", # ชี้เป้าไปที่ SambaNova
+    base_url="https://api.sambanova.ai/v1",
 )
 
 app = FastAPI()
@@ -24,7 +23,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "SambaNova Server (Llama Vision) is Running! 🐢"}
+    return {"status": "SambaNova Llama 90B (Big Boy) is Ready! 🦍"}
 
 # --- ฟังก์ชันแปลงรูปเป็น Base64 ---
 def encode_image(image_content):
@@ -37,7 +36,7 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    print(f"📥 Analyze: {country}")
+    print(f"📥 Analyze Request: {country}")
     try:
         contents = await file.read()
         base64_image = encode_image(contents)
@@ -45,14 +44,15 @@ async def analyze_ui(
         prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output ONLY raw HTML (no markdown) with: 
-        <div class="score">Score 0-100</div>
-        <div class="issues">Critical Issues</div>
-        <div class="suggestions">Suggestions</div>
+        Output ONLY raw HTML code (no markdown code blocks) with this structure:
+        <div class="score"> [Score 0-100] </div>
+        <div class="issues"> [List of Critical Cultural Issues] </div>
+        <div class="suggestions"> [List of Actionable Suggestions] </div>
         """
         
+        # ⚠️ แก้ตรงนี้: เปลี่ยนเป็น 90B (ตัวนี้ยังอยู่และฟรี)
         response = client.chat.completions.create(
-            model="Llama-3.2-11B-Vision-Instruct", # โมเดลนี้ฟรีและเปิดตลอด
+            model="Llama-3.2-90B-Vision-Instruct", 
             messages=[
                 {
                     "role": "user",
@@ -67,16 +67,17 @@ async def analyze_ui(
                     ]
                 }
             ],
-            temperature=0.1,
+            temperature=0.1, 
             max_tokens=1024
         )
         
         result = response.choices[0].message.content
-        return {"result": result.replace("```html", "").replace("```", "").strip()}
+        clean_result = result.replace("```html", "").replace("```", "").strip()
+        return {"result": clean_result}
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        return {"result": f"<div style='color:red'>Server Error: {str(e)}</div>"}
+        return {"result": f"<div style='color:red'><h3>System Error</h3><p>{str(e)}</p></div>"}
 
 # --- Endpoint Fix ---
 @app.post("/fix")
@@ -92,11 +93,12 @@ async def fix_ui(
         
         prompt = f"""
         Create SVG wireframe for {country}. {width}x{height}.
-        Output ONLY raw SVG code. Start with <svg. No markdown.
+        Output ONLY raw SVG code. Start with <svg. Do not use markdown blocks.
         """
         
+        # ⚠️ แก้ตรงนี้ด้วย: เปลี่ยนเป็น 90B
         response = client.chat.completions.create(
-            model="Llama-3.2-11B-Vision-Instruct",
+            model="Llama-3.2-90B-Vision-Instruct",
             messages=[
                 {
                     "role": "user",
@@ -116,6 +118,7 @@ async def fix_ui(
         )
         
         svg = response.choices[0].message.content.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
+        
         if "<svg" in svg: svg = svg[svg.find("<svg"):]
         if "</svg>" in svg: svg = svg[:svg.find("</svg>")+6]
         
