@@ -1,58 +1,21 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import google.generativeai as genai
 import os
 from dotenv import load_dotenv
-from groq import Groq
-import base64
 import traceback
 
 load_dotenv()
 
-# ✅ ตั้งค่า Client
-client = Groq(
-    api_key=os.environ.get("GROQ_API_KEY"),
-)
+# ✅ ใช้ GOOGLE_API_KEY (อย่าลืมไปแก้ใน Render)
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Groq Server is Live! (Fixed Model) 🚀"}
-
-# --- Helper: แปลงรูป ---
-def encode_image(image_content):
-    return base64.b64encode(image_content).decode('utf-8')
-
-# --- Helper: ฟังก์ชันเรียก AI แบบกันเหนียว (ถ้าตัวแรกดับ ใช้ตัวสอง) ---
-def call_groq_with_fallback(messages, max_tokens):
-    # รายชื่อโมเดลที่จะลองใช้ (เรียงจาก ดีสุด -> รองลงมา)
-    models_to_try = [
-        "llama-3.2-90b-vision-preview",  # ตัวเทพ (แนะนำ)
-        "llama-3.2-11b-vision-preview",  # ตัวเล็ก (สำรอง)
-        "llama-3.3-70b-versatile"        # ตัวใหม่ล่าสุด (ถ้ามันรองรับรูป)
-    ]
-    
-    last_error = None
-    
-    for model_name in models_to_try:
-        try:
-            print(f"🔄 Trying model: {model_name}...")
-            response = client.chat.completions.create(
-                messages=messages,
-                model=model_name,
-                temperature=0.2,
-                max_tokens=max_tokens,
-            )
-            print(f"✅ Success with {model_name}!")
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"⚠️ Model {model_name} failed: {str(e)}")
-            last_error = e
-            continue # ลองตัวถัดไป
-            
-    # ถ้าพังทุกตัว
-    raise last_error
+    return {"status": "Server is running with Gemini 1.5 Flash! ⚡"}
 
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
@@ -63,34 +26,29 @@ async def analyze_ui(
 ):
     print(f"📥 Analyze Request: {country}")
     try:
-        contents = await file.read()
-        base64_image = encode_image(contents)
+        # ✅ ใช้ 1.5 Flash ตัวเสถียร (โควต้าเยอะสุด)
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        prompt_text = f"""
+        contents = await file.read()
+        
+        prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output ONLY raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
-        IMPORTANT: Do NOT output markdown code blocks. Just the HTML.
+        Output raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
+        IMPORTANT: Return ONLY the HTML code. Do not include markdown like ```html.
         """
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                ],
-            }
-        ]
-
-        # ✅ เรียกใช้ฟังก์ชันกันเหนียว
-        result = call_groq_with_fallback(messages, max_tokens=1024)
         
-        clean_result = result.replace("```html", "").replace("```", "").strip()
-        return {"result": clean_result}
+        # ส่งรูป + Prompt
+        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
+        
+        print(f"🤖 AI Response: {response.text[:50]}...") 
+        clean_response = response.text.replace("```html", "").replace("```", "").strip()
+        
+        return {"result": clean_response}
 
     except Exception as e:
-        print("❌ Final Error:", e)
+        print("❌ Error:", e)
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Endpoint: Fix ---
@@ -102,47 +60,42 @@ async def fix_ui(
     description: str = Form(""), 
     width: str = Form("375"),    
     height: str = Form("812"),
-    keep_layout: str = Form("false") 
+    keep_layout: str = Form("false")
 ):
     print(f"🎨 Fix Request")
     try:
-        contents = await file.read()
-        base64_image = encode_image(contents)
-
-        layout_instruction = "Maintain exact layout structure." if keep_layout == "true" else "Optimize layout slightly."
-
-        prompt_text = f"""
-        Act as a UI Designer. Create an SVG wireframe for {country} culture.
-        Specs: {width}x{height}, Context: {context}, Desc: "{description}"
-        RULES:
-        1. Output ONLY raw SVG code. NO markdown.
-        2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">
-        3. {layout_instruction}
-        4. Use cultural colors suitable for {country}.
-        """
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                ],
-            }
-        ]
-
-        # ✅ เรียกใช้ฟังก์ชันกันเหนียว
-        svg_code = call_groq_with_fallback(messages, max_tokens=6000)
+        # ✅ ใช้ 1.5 Flash เหมือนเดิม
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # Clean up
-        clean_svg = svg_code.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
+        contents = await file.read()
+        
+        layout_instruction = "Maintain the main layout structure but update styles." if keep_layout == "true" else "You can modernize the layout."
+
+        prompt = f"""
+        Act as a UI Designer. Generate an SVG wireframe for {country} culture.
+        Specs: {width}x{height}, Context: {context}, Desc: "{description}"
+        
+        CRITICAL RULES:
+        1. Output ONLY raw SVG code. NO markdown blocks.
+        2. Start immediately with <svg ...>
+        3. {layout_instruction}
+        4. Make sure all text is visible.
+        """
+        
+        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
+        
+        print(f"🤖 AI SVG Response: {response.text[:50]}...")
+        
+        clean_svg = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
+        
         if "<svg" in clean_svg:
             clean_svg = clean_svg[clean_svg.find("<svg"):]
         if "</svg>" in clean_svg:
             clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
-            
+
         return {"svg": clean_svg}
 
     except Exception as e:
-        print("❌ Final Error:", e)
+        print("❌ Error:", e)
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
