@@ -9,7 +9,7 @@ from PIL import Image
 
 load_dotenv()
 
-# ✅ ใช้ GitHub Token
+# ✅ ตั้งค่า GitHub Token (ต้องใส่ใน Render Environment นะ!)
 github_token = os.environ.get("GITHUB_TOKEN")
 if not github_token:
     print("⚠️ WARNING: GITHUB_TOKEN is missing")
@@ -27,14 +27,13 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "GitHub Models (Llama 3.2 Vision) is Live! 🐙"}
 
-# --- ฟังก์ชันย่อรูป (จำเป็นมากสำหรับ Azure Free Tier) ---
+# --- ฟังก์ชันย่อรูป (ลดภาระ Server) ---
 def process_image(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes))
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
             
-        # ย่อเหลือ 800px (ขนาดที่ Azure อ่านได้แม่นและไม่เกิน Limit)
         max_size = 800
         if max(img.size) > max_size:
             img.thumbnail((max_size, max_size))
@@ -88,7 +87,7 @@ async def analyze_ui(
                     ]
                 }
             ],
-            # ✅ ใช้โมเดล Llama 3.2 90B ตัวท็อปสุด (ฟรีบน GitHub Models)
+            # ✅ ใช้โมเดล Llama 3.2 90B ตัวท็อปสุด (ฟรี)
             model="Llama-3.2-90B-Vision-Instruct",
             temperature=0.1,
             max_tokens=1024,
