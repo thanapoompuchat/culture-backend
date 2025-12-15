@@ -22,22 +22,23 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "Hugging Face (Super Lite) is Live! 🚀"}
+    return {"status": "Hugging Face (Super Compressed) is Live! 🚀"}
 
-# --- ฟังก์ชันย่อรูป (Super Compressed Mode) ---
+# --- ฟังก์ชันย่อรูป (Super Lite Mode) ---
 def process_image(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes))
         
+        # แปลงเป็น RGB เสมอ
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
             
-        # ⚠️ บีบให้เหลือ 512px (เล็กแต่ AI อ่านรู้เรื่อง)
-        max_size = 512 
+        # ⚠️ บีบเหลือ 512px (เล็กมากแต่ผ่านชัวร์)
+        max_size = 512
         if max(img.size) > max_size:
             img.thumbnail((max_size, max_size))
             
-        # ⚠️ ลดคุณภาพเหลือ 50% เพื่อให้ไฟล์เล็กที่สุด
+        # ⚠️ ลด Quality เหลือ 50
         buffered = io.BytesIO()
         img.save(buffered, format="JPEG", quality=50) 
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -92,7 +93,7 @@ async def analyze_ui(
         print("❌ Error:", e)
         traceback.print_exc()
         # ส่งข้อความกลับไปบอกผู้ใช้ตรงๆ ถ้า AI พัง
-        return {"result": f"<div style='color:red'><h3>AI Error</h3><p>HuggingFace is busy. Please try again.</p><p>Detail: {str(e)}</p></div>"}
+        return {"result": f"<div style='color:red'><h3>AI Error</h3><p>HuggingFace is busy/Full. Please try again.</p><p>Detail: {str(e)}</p></div>"}
 
 # --- Endpoint Fix ---
 @app.post("/fix")
