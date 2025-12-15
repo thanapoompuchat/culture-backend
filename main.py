@@ -1,14 +1,23 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
+import os
+from dotenv import load_dotenv
 import base64
 import io
+from PIL import Image
 
-# 🚀 ไม่ต้องใช้ .env หรือ API Key ใดๆ ทั้งสิ้น
-# เรายิงไปที่ Pollinations ซึ่งเป็น Public Proxy ฟรี
+load_dotenv()
+
+# ✅ ใช้ OpenRouter (ศูนย์รวมของฟรี)
+openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+if not openrouter_api_key:
+    print("⚠️ WARNING: OPENROUTER_API_KEY is missing")
+
+# ตั้งค่า Client ให้วิ่งไป OpenRouter
 client = OpenAI(
-    base_url="https://text.pollinations.ai/openai", # ชี้เป้าไปที่นี่
-    api_key="super-free-key", # ใส่อะไรก็ได้ ไม่มีการตรวจ
+    base_url="https://openrouter.ai/api/v1",
+    api_key=openrouter_api_key,
 )
 
 app = FastAPI()
@@ -16,11 +25,28 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "Pollinations (GPT-4o Vision) is Ready! 🦄"}
+    return {"status": "OpenRouter (Free Vision) is Ready! 🚀"}
 
-# --- ฟังก์ชันแปลงรูปเป็น Base64 ---
-def encode_image(image_content):
-    return base64.b64encode(image_content).decode('utf-8')
+# --- ฟังก์ชันย่อรูป (จำเป็นสำหรับของฟรี เพื่อไม่ให้ Time out) ---
+def process_image(image_bytes):
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+            
+        # ย่อเหลือ 800px (ชัดพอให้ AI อ่าน UI ออก)
+        max_size = 800
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size))
+            
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=70) 
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
+        return f"data:image/jpeg;base64,{img_str}"
+    except Exception as e:
+        print(f"Resize Error: {e}")
+        return ""
 
 # --- Endpoint Analyze ---
 @app.post("/analyze")
@@ -29,23 +55,24 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    print(f"📥 Analyze Request via Pollinations: {country}")
+    print(f"📥 Analyze Request: {country}")
     try:
         contents = await file.read()
-        base64_image = encode_image(contents)
+        image_uri = process_image(contents)
         
         prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output ONLY raw HTML code (no markdown code blocks) with this structure:
-        <div class="score"> [Score 0-100] </div>
-        <div class="issues"> [List of Critical Cultural Issues] </div>
-        <div class="suggestions"> [List of Actionable Suggestions] </div>
+        Output ONLY raw HTML (no markdown) with: 
+        <div class="score">Score 0-100</div>
+        <div class="issues">Critical Issues</div>
+        <div class="suggestions">Suggestions</div>
         """
         
-        # ใช้ GPT-4o ฟรีผ่าน Pollinations
+        # เรียก OpenRouter
         response = client.chat.completions.create(
-            model="gpt-4o", # ใช้ตัวท็อปสุดได้เลย
+            # ✅ ใช้โมเดล Qwen 2 VL (Free) -> เก่งเรื่องรูปมาก
+            model="qwen/qwen-2-vl-7b-instruct:free", 
             messages=[
                 {
                     "role": "user",
@@ -54,14 +81,19 @@ async def analyze_ui(
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
+                                "url": image_uri
                             }
                         }
                     ]
                 }
             ],
+            # ต้องใส่ Header นี้ตามกฎของ OpenRouter เพื่อให้ใช้ของฟรีได้เสถียร
+            extra_headers={
+                "HTTP-Referer": "https://render.com", 
+                "X-Title": "UI Analyzer App",
+            },
             temperature=0.2, 
-            max_tokens=2048
+            max_tokens=1024
         )
         
         result = response.choices[0].message.content
@@ -70,7 +102,7 @@ async def analyze_ui(
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        return {"result": f"<div style='color:red'><h3>Service Error</h3><p>{str(e)}</p></div>"}
+        return {"result": f"<div style='color:red'><h3>System Error</h3><p>{str(e)}</p></div>"}
 
 # --- Endpoint Fix ---
 @app.post("/fix")
@@ -82,16 +114,15 @@ async def fix_ui(
 ):
     try:
         contents = await file.read()
-        base64_image = encode_image(contents)
+        image_uri = process_image(contents)
         
         prompt = f"""
         Create SVG wireframe for {country}. {width}x{height}.
-        Output ONLY raw SVG code. Start with <svg. Do not use markdown blocks.
-        Make sure the code is valid SVG.
+        Output ONLY raw SVG code. Start with <svg. No markdown.
         """
         
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="qwen/qwen-2-vl-7b-instruct:free",
             messages=[
                 {
                     "role": "user",
@@ -100,18 +131,21 @@ async def fix_ui(
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
+                                "url": image_uri
                             }
                         }
                     ]
                 }
             ],
+            extra_headers={
+                "HTTP-Referer": "https://render.com", 
+                "X-Title": "UI Analyzer App",
+            },
             temperature=0.2,
-            max_tokens=3000
+            max_tokens=2048
         )
         
         svg = response.choices[0].message.content.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
-        
         if "<svg" in svg: svg = svg[svg.find("<svg"):]
         if "</svg>" in svg: svg = svg[:svg.find("</svg>")+6]
         
