@@ -1,20 +1,27 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import google.generativeai as genai
 import os
 from dotenv import load_dotenv
-import traceback
+from groq import Groq
+import base64
 
 load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
+
+# ✅ เรียกใช้ Groq แทน Google
+client = Groq(
+    api_key=os.environ.get("GROQ_API_KEY"),
+)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Server is running! 🚀"}
+    return {"status": "Groq Server is running! ⚡"}
+
+# --- Helper: แปลงรูปเป็น Base64 (Groq ต้องการแบบนี้) ---
+def encode_image(image_content):
+    return base64.b64encode(image_content).decode('utf-8')
 
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
@@ -23,28 +30,36 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    # ✅ เปลี่ยนมาใช้ตัวนี้ เร็ว + ยืดหยุ่นกว่า
-    target_model_name = 'gemini-2.0-flash-exp'
-    
-    print(f"📥 Analyze Request: {country} - {target_model_name}")
+    print(f"📥 Analyze Request: {country} using Llama-3.2-Vision")
     try:
-        model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
+        base64_image = encode_image(contents)
         
-        prompt = f"""
-        Act as a UX/UI Expert. Analyze this UI for {country} culture.
-        Context: {context}.
-        Output raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
-        IMPORTANT: Return ONLY the HTML code. Do not include markdown like ```html.
-        """
-        
-        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
-        
-        # 🕵️‍♂️ Debug: ปริ้นท์คำตอบ AI ออกมาดูใน Log เลย
-        print(f"🤖 AI Response: {response.text[:100]}...") 
-        
-        clean_response = response.text.replace("```html", "").replace("```", "").strip()
-        return {"result": clean_response}
+        # Groq (Llama 3.2 Vision) Prompt Structure
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Analyze this UI for {country} culture. Context: {context}. Output ONLY raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai. Do NOT use markdown formatting."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            model="llama-3.2-11b-vision-preview", # 👈 รุ่นนี้มองเห็นภาพได้ + ฟรี
+            temperature=0.1, # นิ่งๆ ไม่มั่ว
+            max_tokens=1024,
+        )
+
+        result = chat_completion.choices[0].message.content
+        print("✅ Analyze Done")
+        return {"result": result.replace("```html", "").replace("```", "").strip()}
+
     except Exception as e:
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -60,49 +75,53 @@ async def fix_ui(
     height: str = Form("812"),
     keep_layout: str = Form("false") 
 ):
-    # ✅ ใช้ตัว 2.0 Flash Exp เหมือนกัน
-    target_model_name = 'gemini-2.0-flash-exp'
-    
-    print(f"🎨 Fix Request: {target_model_name}")
+    print(f"🎨 Fix Request using Groq")
     try:
-        # 🔥 Config: บังคับให้ตอบแบบมั่นใจ ไม่มั่ว
-        generation_config = genai.types.GenerationConfig(
-            temperature=0.3, 
-            max_output_tokens=8000
-        )
-
-        model = genai.GenerativeModel(target_model_name)
         contents = await file.read()
-        
-        layout_instruction = "Maintain the main layout structure but update styles." if keep_layout == "true" else "You can modernize the layout."
+        base64_image = encode_image(contents)
 
-        prompt = f"""
-        Act as a UI Designer. Generate an SVG wireframe for {country} culture.
+        layout_instruction = "Maintain exact layout structure." if keep_layout == "true" else "You can optimize the layout."
+
+        prompt_text = f"""
+        Act as a UI Designer. Create an SVG wireframe for {country} culture.
         Specs: {width}x{height}, Context: {context}, Desc: "{description}"
-        
-        CRITICAL RULES:
-        1. Output ONLY raw SVG code. NO markdown blocks (```svg). NO explanatory text.
-        2. Start immediately with <svg ...>
+        RULES:
+        1. Output ONLY raw SVG code. NO markdown. NO intro text.
+        2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">
         3. {layout_instruction}
-        4. Make sure all text is visible.
+        4. Use cultural colors suitable for {country}.
         """
-        
-        response = model.generate_content(
-            [{'mime_type': 'image/jpeg', 'data': contents}, prompt],
-            generation_config=generation_config
+
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            model="llama-3.2-90b-vision-preview", # 👈 ใช้ตัวใหญ่ (90b) เพื่อความฉลาดในการเขียนโค้ด
+            temperature=0.2,
+            max_tokens=6000,
         )
+
+        svg_code = chat_completion.choices[0].message.content
         
-        # 🕵️‍♂️ Debug: เช็กว่า AI ส่ง SVG มาจริงไหม
-        print(f"🤖 AI SVG Response (First 100 chars): {response.text[:100]}")
-        
-        clean_svg = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
-        
-        # ถ้า AI เผลอพูดนำหน้า ให้ตัดทิ้ง (Hack fix)
+        # Clean up output
+        clean_svg = svg_code.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
         if "<svg" in clean_svg:
             clean_svg = clean_svg[clean_svg.find("<svg"):]
         if "</svg>" in clean_svg:
             clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
-
+            
+        print("✅ Fix Done")
         return {"svg": clean_svg}
 
     except Exception as e:
