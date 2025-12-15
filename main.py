@@ -1,21 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-import os
-from dotenv import load_dotenv
 import base64
 import io
 
-load_dotenv()
-
-# ✅ ใช้ SambaNova Key เดิมได้เลย
-sambanova_api_key = os.environ.get("SAMBANOVA_API_KEY")
-if not sambanova_api_key:
-    print("⚠️ WARNING: SAMBANOVA_API_KEY is missing")
-
+# 🚀 ไม่ต้องใช้ .env หรือ API Key ใดๆ ทั้งสิ้น
+# เรายิงไปที่ Pollinations ซึ่งเป็น Public Proxy ฟรี
 client = OpenAI(
-    api_key=sambanova_api_key,
-    base_url="https://api.sambanova.ai/v1",
+    base_url="https://text.pollinations.ai/openai", # ชี้เป้าไปที่นี่
+    api_key="super-free-key", # ใส่อะไรก็ได้ ไม่มีการตรวจ
 )
 
 app = FastAPI()
@@ -23,7 +16,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "SambaNova Llama 90B (Big Boy) is Ready! 🦍"}
+    return {"status": "Pollinations (GPT-4o Vision) is Ready! 🦄"}
 
 # --- ฟังก์ชันแปลงรูปเป็น Base64 ---
 def encode_image(image_content):
@@ -36,7 +29,7 @@ async def analyze_ui(
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    print(f"📥 Analyze Request: {country}")
+    print(f"📥 Analyze Request via Pollinations: {country}")
     try:
         contents = await file.read()
         base64_image = encode_image(contents)
@@ -50,9 +43,9 @@ async def analyze_ui(
         <div class="suggestions"> [List of Actionable Suggestions] </div>
         """
         
-        # ⚠️ แก้ตรงนี้: เปลี่ยนเป็น 90B (ตัวนี้ยังอยู่และฟรี)
+        # ใช้ GPT-4o ฟรีผ่าน Pollinations
         response = client.chat.completions.create(
-            model="Llama-3.2-90B-Vision-Instruct", 
+            model="gpt-4o", # ใช้ตัวท็อปสุดได้เลย
             messages=[
                 {
                     "role": "user",
@@ -67,8 +60,8 @@ async def analyze_ui(
                     ]
                 }
             ],
-            temperature=0.1, 
-            max_tokens=1024
+            temperature=0.2, 
+            max_tokens=2048
         )
         
         result = response.choices[0].message.content
@@ -77,7 +70,7 @@ async def analyze_ui(
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        return {"result": f"<div style='color:red'><h3>System Error</h3><p>{str(e)}</p></div>"}
+        return {"result": f"<div style='color:red'><h3>Service Error</h3><p>{str(e)}</p></div>"}
 
 # --- Endpoint Fix ---
 @app.post("/fix")
@@ -94,11 +87,11 @@ async def fix_ui(
         prompt = f"""
         Create SVG wireframe for {country}. {width}x{height}.
         Output ONLY raw SVG code. Start with <svg. Do not use markdown blocks.
+        Make sure the code is valid SVG.
         """
         
-        # ⚠️ แก้ตรงนี้ด้วย: เปลี่ยนเป็น 90B
         response = client.chat.completions.create(
-            model="Llama-3.2-90B-Vision-Instruct",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "user",
@@ -113,8 +106,8 @@ async def fix_ui(
                     ]
                 }
             ],
-            temperature=0.1,
-            max_tokens=2048
+            temperature=0.2,
+            max_tokens=3000
         )
         
         svg = response.choices[0].message.content.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
