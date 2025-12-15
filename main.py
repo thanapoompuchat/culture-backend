@@ -9,15 +9,15 @@ from PIL import Image
 
 load_dotenv()
 
-# ✅ ใช้ OpenRouter (ศูนย์รวมของฟรี)
-openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-if not openrouter_api_key:
-    print("⚠️ WARNING: OPENROUTER_API_KEY is missing")
+# ✅ ใช้ GitHub Token
+github_token = os.environ.get("GITHUB_TOKEN")
+if not github_token:
+    print("⚠️ WARNING: GITHUB_TOKEN is missing")
 
-# ตั้งค่า Client ให้วิ่งไป OpenRouter
+# 🔗 เชื่อมต่อ Server ของ Microsoft Azure (ผ่าน GitHub Models)
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=openrouter_api_key,
+    base_url="https://models.inference.ai.azure.com",
+    api_key=github_token,
 )
 
 app = FastAPI()
@@ -25,16 +25,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "OpenRouter (Free Vision) is Ready! 🚀"}
+    return {"status": "GitHub Models (Llama 3.2 Vision) is Live! 🐙"}
 
-# --- ฟังก์ชันย่อรูป (จำเป็นสำหรับของฟรี เพื่อไม่ให้ Time out) ---
+# --- ฟังก์ชันย่อรูป (จำเป็นมากสำหรับ Azure Free Tier) ---
 def process_image(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes))
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
             
-        # ย่อเหลือ 800px (ชัดพอให้ AI อ่าน UI ออก)
+        # ย่อเหลือ 800px (ขนาดที่ Azure อ่านได้แม่นและไม่เกิน Limit)
         max_size = 800
         if max(img.size) > max_size:
             img.thumbnail((max_size, max_size))
@@ -69,11 +69,12 @@ async def analyze_ui(
         <div class="suggestions">Suggestions</div>
         """
         
-        # เรียก OpenRouter
         response = client.chat.completions.create(
-            # ✅ ใช้โมเดล Qwen 2 VL (Free) -> เก่งเรื่องรูปมาก
-            model="qwen/qwen-2-vl-7b-instruct:free", 
             messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that analyzes UI designs."
+                },
                 {
                     "role": "user",
                     "content": [
@@ -87,13 +88,11 @@ async def analyze_ui(
                     ]
                 }
             ],
-            # ต้องใส่ Header นี้ตามกฎของ OpenRouter เพื่อให้ใช้ของฟรีได้เสถียร
-            extra_headers={
-                "HTTP-Referer": "https://render.com", 
-                "X-Title": "UI Analyzer App",
-            },
-            temperature=0.2, 
-            max_tokens=1024
+            # ✅ ใช้โมเดล Llama 3.2 90B ตัวท็อปสุด (ฟรีบน GitHub Models)
+            model="Llama-3.2-90B-Vision-Instruct",
+            temperature=0.1,
+            max_tokens=1024,
+            top_p=1.0
         )
         
         result = response.choices[0].message.content
@@ -122,8 +121,11 @@ async def fix_ui(
         """
         
         response = client.chat.completions.create(
-            model="qwen/qwen-2-vl-7b-instruct:free",
             messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert UI designer who outputs only SVG code."
+                },
                 {
                     "role": "user",
                     "content": [
@@ -137,12 +139,10 @@ async def fix_ui(
                     ]
                 }
             ],
-            extra_headers={
-                "HTTP-Referer": "https://render.com", 
-                "X-Title": "UI Analyzer App",
-            },
-            temperature=0.2,
-            max_tokens=2048
+            model="Llama-3.2-90B-Vision-Instruct",
+            temperature=0.1,
+            max_tokens=2048,
+            top_p=1.0
         )
         
         svg = response.choices[0].message.content.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
