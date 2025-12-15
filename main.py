@@ -1,79 +1,82 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+# ใส่ try-except ดักไว้ ถ้าไม่มี Library จะได้รู้
+try:
+    from huggingface_hub import InferenceClient
+except ImportError:
+    print("❌ CRITICAL ERROR: 'huggingface_hub' is missing in requirements.txt")
+    raise
+
 import os
 from dotenv import load_dotenv
-from groq import Groq
 import base64
 import traceback
 
 load_dotenv()
 
-# ✅ เรียกใช้ Groq
-client = Groq(
-    api_key=os.environ.get("GROQ_API_KEY"),
-)
+# ✅ ใช้ Token ที่คุณให้มา (แต่จริงๆ ควรใส่ใน Render Environment)
+# เพื่อความชัวร์ ผมใส่ Code ดักไว้ว่าถ้าใน Render ไม่มี ให้ใช้ค่าว่าง (จะไม่ Crash แต่จะ Error ตอนเรียกใช้แทน)
+hf_token = os.environ.get("HF_TOKEN")
+if not hf_token:
+    print("⚠️ WARNING: HF_TOKEN is missing. Please add it to Render Environment Variables.")
+
+client = InferenceClient(api_key=hf_token)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Groq Server (Llama 4) is running! ⚡"}
+    return {"status": "Hugging Face Server is Live! 🚀"}
 
-def encode_image(image_content):
-    return base64.b64encode(image_content).decode('utf-8')
+def get_image_data_uri(image_content):
+    base64_img = base64.b64encode(image_content).decode('utf-8')
+    return f"data:image/jpeg;base64,{base64_img}"
 
-# --- Endpoint: Analyze ---
+# --- Analyze Endpoint ---
 @app.post("/analyze")
 async def analyze_ui(
     file: UploadFile = File(...), 
     country: str = Form(...), 
     context: str = Form(...)
 ):
-    print(f"📥 Analyze Request: {country}")
+    print(f"📥 Analyze: {country}")
     try:
         contents = await file.read()
-        base64_image = encode_image(contents)
+        image_uri = get_image_data_uri(contents)
         
-        # Llama 4 Prompt
-        prompt_text = f"""
+        prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output ONLY raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
-        IMPORTANT: Do NOT output markdown code blocks (no ```html). Just the raw HTML string.
+        Output raw HTML with: Score, Issues, Suggestions.
         """
-
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
-                    ],
-                }
-            ],
-            # ✅ ใช้ Llama 4 Maverick (รุ่นใหม่ล่าสุดที่มาแทน)
-            model="meta-llama/llama-4-maverick-17b-128e-instruct", 
-            temperature=0.1,
-            max_tokens=1024,
+        
+        # ใช้ Qwen2-VL-7B (ตัวเล็ก เสถียรสุดสำหรับ Free Tier)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_uri}},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        completion = client.chat.completions.create(
+            model="Qwen/Qwen2-VL-7B-Instruct", 
+            messages=messages, 
+            max_tokens=1000,
+            temperature=0.1
         )
-
-        result = chat_completion.choices[0].message.content
-        print("✅ Analyze Done")
-        return {"result": result.replace("```html", "").replace("```", "").strip()}
+        
+        return {"result": completion.choices[0].message.content.replace("```html", "").replace("```", "").strip()}
 
     except Exception as e:
         print("❌ Error:", e)
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"result": f"Error: {str(e)}"}
 
-# --- Endpoint: Fix ---
+# --- Fix Endpoint ---
 @app.post("/fix")
 async def fix_ui(
     file: UploadFile = File(...), 
@@ -82,58 +85,39 @@ async def fix_ui(
     description: str = Form(""), 
     width: str = Form("375"),    
     height: str = Form("812"),
-    keep_layout: str = Form("false") 
+    keep_layout: str = Form("false")
 ):
-    print(f"🎨 Fix Request using Llama 4")
     try:
         contents = await file.read()
-        base64_image = encode_image(contents)
-
-        layout_instruction = "Maintain exact layout structure." if keep_layout == "true" else "Optimize layout slightly."
-
-        prompt_text = f"""
-        Act as a UI Designer. Create an SVG wireframe for {country} culture.
-        Specs: {width}x{height}, Context: {context}, Desc: "{description}"
-        RULES:
-        1. Output ONLY raw SVG code. NO markdown.
-        2. Start immediately with <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 {width} {height}">
-        3. {layout_instruction}
-        4. Use cultural colors suitable for {country}.
-        """
-
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
-                    ],
-                }
-            ],
-            # ✅ ใช้ Llama 4 Maverick
-            model="meta-llama/llama-4-maverick-17b-128e-instruct",
-            temperature=0.2,
-            max_tokens=6000,
-        )
-
-        svg_code = chat_completion.choices[0].message.content
+        image_uri = get_image_data_uri(contents)
         
-        clean_svg = svg_code.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
-        if "<svg" in clean_svg:
-            clean_svg = clean_svg[clean_svg.find("<svg"):]
-        if "</svg>" in clean_svg:
-            clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
-            
-        print("✅ Fix Done")
-        return {"svg": clean_svg}
+        prompt = f"""
+        Create SVG wireframe for {country}. {width}x{height}.
+        Output ONLY raw SVG. Start with <svg.
+        """
+        
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_uri}},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        completion = client.chat.completions.create(
+            model="Qwen/Qwen2-VL-7B-Instruct",
+            messages=messages,
+            max_tokens=4000
+        )
+        
+        svg = completion.choices[0].message.content.replace("```svg", "").replace("```", "").strip()
+        if "<svg" in svg: svg = svg[svg.find("<svg"):]
+        if "</svg>" in svg: svg = svg[:svg.find("</svg>")+6]
+        
+        return {"svg": svg}
 
     except Exception as e:
         print("❌ Error:", e)
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"svg": ""}
