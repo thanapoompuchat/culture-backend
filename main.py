@@ -23,7 +23,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "Culture AI Backend is Ready! 🚀"}
 
-# --- ฟังก์ชันย่อรูป ---
 def process_image(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes))
@@ -42,24 +41,36 @@ def process_image(image_bytes):
         print(f"Resize Error: {e}")
         return ""
 
-# --- ฟังก์ชันทำความสะอาด SVG (ตัวใหม่! สำคัญมาก) ---
-def clean_svg_content(raw_content):
-    # 1. ลบ Markdown (```xml หรือ ```)
-    clean = raw_content.replace("```xml", "").replace("```svg", "").replace("```", "")
+# --- ✅ ฟังก์ชันกรอง SVG ขั้นเทพ (แก้ใหม่) ---
+def clean_and_repair_svg(raw_content):
+    print("🧹 Cleaning SVG...")
     
-    # 2. หาจุดเริ่ม <svg และจุดจบ </svg>
-    start_match = re.search(r'<svg', clean, re.IGNORECASE)
-    end_match = re.search(r'</svg>', clean, re.IGNORECASE)
+    # 1. ลบ Markdown Code Block ทิ้งก่อนเลย
+    content = raw_content.replace("```xml", "").replace("```svg", "").replace("```", "")
     
-    if start_match and end_match:
-        start_index = start_match.start()
-        end_index = end_match.end()
-        svg_code = clean[start_index:end_index]
+    # 2. ค้นหา <svg ... > จนถึง </svg> (ใช้ re.DOTALL เพื่อให้หาข้ามบรรทัดได้)
+    pattern = r"(<svg[\s\S]*?</svg>)"
+    match = re.search(pattern, content, re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        svg_code = match.group(1)
+        
+        # 3. 🔪 ตัด Tag ที่ Figma เกลียดออก (สำคัญมาก!)
+        # Figma ไม่รองรับ foreignObject, switch, script, style แบบซับซ้อน
+        forbidden_tags = ['foreignObject', 'script', 'iframe', 'animation']
+        for tag in forbidden_tags:
+            # ลบ tag เปิดและปิด และเนื้อหาข้างในทิ้ง
+            svg_code = re.sub(f'<{tag}[\s\S]*?</{tag}>', '', svg_code, flags=re.IGNORECASE)
+            # ลบ tag เดี่ยวๆ (เผื่อมี)
+            svg_code = re.sub(f'<{tag}[^>]*>', '', svg_code, flags=re.IGNORECASE)
+
+        # 4. ลบ attribute ที่อาจทำให้พัง
+        svg_code = svg_code.replace('contenteditable="true"', '')
+        
         return svg_code
     
     return None
 
-# --- Endpoint Analyze ---
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
     print(f"📥 Analyze: {country}")
@@ -71,8 +82,8 @@ async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), con
         Act as a UX/UI Cultural Expert for {country}. Context: {context}.
         Analyze the image. Output HTML only (no markdown):
         <div class="score"> [Score 0-100] </div>
-        <div class="issues"> [Bullet points of issues] </div>
-        <div class="suggestions"> [Bullet points of fixes] </div>
+        <div class="issues"> <ul><li>[Issue 1]</li><li>[Issue 2]</li></ul> </div>
+        <div class="suggestions"> <ul><li>[Fix 1]</li><li>[Fix 2]</li></ul> </div>
         """
         
         response = client.chat.completions.create(
@@ -87,74 +98,79 @@ async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), con
     except Exception as e:
         return {"result": f"Error: {str(e)}"}
 
-# --- Endpoint Fix (ตัวแก้ปัญหาหลัก) ---
 @app.post("/fix")
 async def fix_ui(
     file: UploadFile = File(...), 
     country: str = Form(...), 
     width: str = Form("375"),    
     height: str = Form("812"),
-    translate_text: str = Form("false"), # รับมาเป็น String ก่อนกันเหนียว
+    translate_text: str = Form("false"),
     keep_layout: str = Form("true")
 ):
-    # แปลง String เป็น Boolean
     is_translate = translate_text.lower() == 'true'
     is_keep_layout = keep_layout.lower() == 'true'
     
-    print(f"🛠️ Fix: {country} | Size: {width}x{height} | Trans: {is_translate} | Keep: {is_keep_layout}")
+    print(f"🛠️ Fix Request: {country} | Size: {width}x{height} | Trans: {is_translate} | Keep: {is_keep_layout}")
     
     try:
         contents = await file.read()
         image_uri = process_image(contents)
 
-        # 🔥 Prompt ที่สั่งให้ output สะอาดที่สุด
+        # 🔥 Prompt แบบบังคับขู่เข็ญให้วาดง่ายๆ
         prompt = f"""
-        You are a UI Wireframe Generator. Output ONLY valid SVG XML code.
+        You are a UI Wireframe Engine. Convert the image into valid SVG Code for {country}.
+        Canvas Size: width="{width}" height="{height}"
         
-        Task: Recreate the UI in the image for {country}.
-        Canvas: width="{width}" height="{height}"
+        STRICT RULES FOR FIGMA COMPATIBILITY:
+        1. OUTPUT ONLY SVG CODE. No explanations.
+        2. DO NOT use <foreignObject> (Figma crashes).
+        3. DO NOT use <img> tag (Figma blocks external URLs). Use <rect> with fill="#DDD" for images.
+        4. Use ONLY these tags: <rect>, <circle>, <text>, <path>, <g>.
+        5. All text must be inside <text> tags.
         
-        Instructions:
-        1. BACKGROUND: Start with <rect width="100%" height="100%" fill="#FFFFFF"/>
-        2. STRUCTURE: Draw rectangles for Header, Content, Footer.
-        3. DETAILS: Draw internal elements (buttons, images, inputs) as simple <rect> tags.
-        4. COLOR: Use high contrast colors (Light Gray #F3F4F6 for background, Dark Gray #374151 for elements).
+        DESIGN INSTRUCTION:
+        - Recreate the layout structure.
+        - Background: <rect width="100%" height="100%" fill="#FFFFFF"/>
+        - Images: Draw a <rect> with color #e5e7eb.
+        - Buttons: Draw a <rect> with rounded corners (rx="4").
+        - Text: Use font-family="Arial, sans-serif".
         
-        Logic for {country}:
-        - If {country} is Thailand/Asia: High density, many boxes.
-        - If {country} is Western: More whitespace.
-        
-        CRITICAL RULES:
-        - OUTPUT RAW SVG ONLY. NO MARKDOWN (```). NO EXPLANATION.
-        - DO NOT use <foreignObject>.
-        - DO NOT use <image>. Use <rect> as placeholder.
-        - Ensure string starts with <svg and ends with </svg>.
+        Cultural Adjustment ({country}):
+        - If {country} is Thailand/Japan: Use tighter spacing, more information density.
+        - If {country} is USA/Europe: Use more whitespace, bigger headings.
         """
 
         response = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are an SVG rendering engine. Output code only."},
+                {"role": "system", "content": "You are a coding machine. Return only SVG XML. No markdown."},
                 {"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": image_uri}}]}
             ],
-            model="Llama-3.2-11B-Vision-Instruct",
-            temperature=0.1, # นิ่งที่สุด
-            max_tokens=3000,
+            model="Llama-3.2-11B-Vision-Instruct", # รุ่น 11B เร็วและทำตามคำสั่ง Code ได้ดี
+            temperature=0.1, 
+            max_tokens=4000,
         )
         
         raw_content = response.choices[0].message.content
-        print(f"🤖 Raw AI Response Length: {len(raw_content)}")
+        print(f"🤖 AI Response Length: {len(raw_content)}")
 
-        # ✅ เรียกใช้ฟังก์ชันทำความสะอาด
-        clean_svg = clean_svg_content(raw_content)
+        # เรียกใช้ตัวกรองใหม่
+        clean_svg = clean_and_repair_svg(raw_content)
         
         if clean_svg:
-            print("✅ SVG Extracted Successfully")
+            print("✅ SVG Sent to Figma")
             return {"svg": clean_svg}
         else:
-            print("❌ SVG Extraction Failed, sending fallback")
-            # SVG สำรองกรณีฉุกเฉิน
-            return {"svg": f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fee2e2"/><text x="50%" y="50%" fill="red" font-family="sans-serif" text-anchor="middle">AI generated invalid code</text></svg>'}
+            print("❌ Invalid SVG, Sending Fallback")
+            # Fallback SVG ที่ดูดีขึ้นนิดนึง บอก User ว่าเกิดอะไรขึ้น
+            return {"svg": f'''
+                <svg width="{width}" height="{height}" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)">
+                    <rect width="100%" height="100%" fill="#F3F4F6"/>
+                    <rect x="20" y="20" width="{int(width)-40}" height="{int(height)-40}" rx="10" fill="white" stroke="#EF4444" stroke-width="2"/>
+                    <text x="50%" y="45%" fill="#EF4444" font-family="sans-serif" font-size="20" text-anchor="middle" font-weight="bold">Generation Failed</text>
+                    <text x="50%" y="55%" fill="#666" font-family="sans-serif" font-size="14" text-anchor="middle">AI output contained invalid data.</text>
+                </svg>
+            '''}
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Server Error: {e}")
         return {"svg": ""}
