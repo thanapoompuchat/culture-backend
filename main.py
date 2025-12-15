@@ -1,24 +1,20 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-# ใส่ try-except ดักไว้ ถ้าไม่มี Library จะได้รู้
-try:
-    from huggingface_hub import InferenceClient
-except ImportError:
-    print("❌ CRITICAL ERROR: 'huggingface_hub' is missing in requirements.txt")
-    raise
-
+from huggingface_hub import InferenceClient
 import os
 from dotenv import load_dotenv
 import base64
+import io
+from PIL import Image
 import traceback
 
 load_dotenv()
 
-# ✅ ใช้ Token ที่คุณให้มา (แต่จริงๆ ควรใส่ใน Render Environment)
-# เพื่อความชัวร์ ผมใส่ Code ดักไว้ว่าถ้าใน Render ไม่มี ให้ใช้ค่าว่าง (จะไม่ Crash แต่จะ Error ตอนเรียกใช้แทน)
+# ✅ ตั้งค่า Client
+# ใช้ Token จาก Render Environment หรือ Fallback
 hf_token = os.environ.get("HF_TOKEN")
 if not hf_token:
-    print("⚠️ WARNING: HF_TOKEN is missing. Please add it to Render Environment Variables.")
+    print("⚠️ WARNING: HF_TOKEN missing")
 
 client = InferenceClient(api_key=hf_token)
 
@@ -27,11 +23,75 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "Hugging Face Server is Live! 🚀"}
+    return {"status": "Hugging Face Server (Optimized) is Live! 🚀"}
 
-def get_image_data_uri(image_content):
-    base64_img = base64.b64encode(image_content).decode('utf-8')
-    return f"data:image/jpeg;base64,{base64_img}"
+# --- ฟังก์ชันย่อรูป (หัวใจสำคัญแก้ Error 400) ---
+def process_image(image_bytes):
+    try:
+        # เปิดรูปจาก bytes
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        # แปลงเป็น RGB (กันเหนียวเผื่อเจอไฟล์ PNG ใส)
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+            
+        # ✅ ย่อรูป: ถ้าด้านไหนเกิน 800px ให้ย่อลง (AI อ่านรู้เรื่อง ประหยัด Bandwidth)
+        max_size = 800
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size))
+            
+        # ✅ แปลงกลับเป็น Base64 (JPEG Quality 70 พอ)
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=70)
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
+        return f"data:image/jpeg;base64,{img_str}"
+    except Exception as e:
+        print(f"⚠️ Image processing failed: {e}")
+        # ถ้าพัง ให้ส่งแบบเดิมไปวัดดวง
+        return f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+
+# --- ฟังก์ชันเรียก AI แบบสู้ชีวิต ---
+def call_huggingface(prompt, image_uri, max_tokens=1000):
+    # รายชื่อโมเดลเรียงตามความน่าจะเป็นที่จะรอด (ของฟรี)
+    models = [
+        "Qwen/Qwen2-VL-7B-Instruct",       # ตัวแรกที่ลอง
+        "microsoft/Phi-3.5-vision-instruct", # ตัวสำรอง (เก่งมาก)
+        "meta-llama/Llama-3.2-11B-Vision-Instruct" # ตัวสุดท้าย (ต้องมีสิทธิ์)
+    ]
+    
+    last_error = None
+    
+    for model_id in models:
+        try:
+            print(f"🔄 Trying model: {model_id}...")
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_uri}},
+                        {"type": "text", "text": prompt}
+                    ]
+                }
+            ]
+            
+            completion = client.chat.completions.create(
+                model=model_id, 
+                messages=messages, 
+                max_tokens=max_tokens,
+                temperature=0.2
+            )
+            
+            print(f"✅ Success with {model_id}!")
+            return completion.choices[0].message.content
+            
+        except Exception as e:
+            print(f"⚠️ Failed with {model_id}: {e}")
+            last_error = e
+            continue
+    
+    # ถ้าพังทุกตัว ให้โยน Error จริงออกมา
+    raise last_error
 
 # --- Analyze Endpoint ---
 @app.post("/analyze")
@@ -43,38 +103,24 @@ async def analyze_ui(
     print(f"📥 Analyze: {country}")
     try:
         contents = await file.read()
-        image_uri = get_image_data_uri(contents)
+        # ✅ เรียกใช้ฟังก์ชันย่อรูปก่อนส่ง
+        image_uri = process_image(contents)
         
         prompt = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output raw HTML with: Score, Issues, Suggestions.
+        Output ONLY raw HTML with: Score (0-100), Critical Issues, and Suggestions.
+        Do NOT use markdown.
         """
         
-        # ใช้ Qwen2-VL-7B (ตัวเล็ก เสถียรสุดสำหรับ Free Tier)
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_uri}},
-                    {"type": "text", "text": prompt}
-                ]
-            }
-        ]
-        
-        completion = client.chat.completions.create(
-            model="Qwen/Qwen2-VL-7B-Instruct", 
-            messages=messages, 
-            max_tokens=1000,
-            temperature=0.1
-        )
-        
-        return {"result": completion.choices[0].message.content.replace("```html", "").replace("```", "").strip()}
+        result = call_huggingface(prompt, image_uri)
+        return {"result": result.replace("```html", "").replace("```", "").strip()}
 
     except Exception as e:
         print("❌ Error:", e)
         traceback.print_exc()
-        return {"result": f"Error: {str(e)}"}
+        # ส่งค่า Error กลับไปแบบเนียนๆ ไม่ให้หน้าเว็บพัง
+        return {"result": f"<div style='color:red'><h3>AI Busy/Error</h3><p>{str(e)}</p></div>"}
 
 # --- Fix Endpoint ---
 @app.post("/fix")
@@ -89,34 +135,20 @@ async def fix_ui(
 ):
     try:
         contents = await file.read()
-        image_uri = get_image_data_uri(contents)
+        image_uri = process_image(contents)
         
         prompt = f"""
         Create SVG wireframe for {country}. {width}x{height}.
         Output ONLY raw SVG. Start with <svg.
         """
         
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_uri}},
-                    {"type": "text", "text": prompt}
-                ]
-            }
-        ]
+        svg = call_huggingface(prompt, image_uri, max_tokens=2000)
         
-        completion = client.chat.completions.create(
-            model="Qwen/Qwen2-VL-7B-Instruct",
-            messages=messages,
-            max_tokens=4000
-        )
+        clean_svg = svg.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
+        if "<svg" in clean_svg: clean_svg = clean_svg[clean_svg.find("<svg"):]
+        if "</svg>" in clean_svg: clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
         
-        svg = completion.choices[0].message.content.replace("```svg", "").replace("```", "").strip()
-        if "<svg" in svg: svg = svg[svg.find("<svg"):]
-        if "</svg>" in svg: svg = svg[:svg.find("</svg>")+6]
-        
-        return {"svg": svg}
+        return {"svg": clean_svg}
 
     except Exception as e:
         print("❌ Error:", e)
