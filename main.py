@@ -1,21 +1,27 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+from groq import Groq
+import base64
 import traceback
 
 load_dotenv()
 
-# ✅ ใช้ GOOGLE_API_KEY (อย่าลืมไปแก้ใน Render)
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+# ✅ เรียกใช้ Groq
+client = Groq(
+    api_key=os.environ.get("GROQ_API_KEY"),
+)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Server is running with Gemini 1.5 Flash! ⚡"}
+    return {"status": "Groq Server (Llama 4) is running! ⚡"}
+
+def encode_image(image_content):
+    return base64.b64encode(image_content).decode('utf-8')
 
 # --- Endpoint: Analyze ---
 @app.post("/analyze")
@@ -26,25 +32,41 @@ async def analyze_ui(
 ):
     print(f"📥 Analyze Request: {country}")
     try:
-        # ✅ ใช้ 1.5 Flash ตัวเสถียร (โควต้าเยอะสุด)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
         contents = await file.read()
+        base64_image = encode_image(contents)
         
-        prompt = f"""
+        # Llama 4 Prompt
+        prompt_text = f"""
         Act as a UX/UI Expert. Analyze this UI for {country} culture.
         Context: {context}.
-        Output raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
-        IMPORTANT: Return ONLY the HTML code. Do not include markdown like ```html.
+        Output ONLY raw HTML with: Score (0-100), Critical Issues, and Suggestions in Thai.
+        IMPORTANT: Do NOT output markdown code blocks (no ```html). Just the raw HTML string.
         """
-        
-        # ส่งรูป + Prompt
-        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
-        
-        print(f"🤖 AI Response: {response.text[:50]}...") 
-        clean_response = response.text.replace("```html", "").replace("```", "").strip()
-        
-        return {"result": clean_response}
+
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            # ✅ ใช้ Llama 4 Maverick (รุ่นใหม่ล่าสุดที่มาแทน)
+            model="meta-llama/llama-4-maverick-17b-128e-instruct", 
+            temperature=0.1,
+            max_tokens=1024,
+        )
+
+        result = chat_completion.choices[0].message.content
+        print("✅ Analyze Done")
+        return {"result": result.replace("```html", "").replace("```", "").strip()}
 
     except Exception as e:
         print("❌ Error:", e)
@@ -60,39 +82,55 @@ async def fix_ui(
     description: str = Form(""), 
     width: str = Form("375"),    
     height: str = Form("812"),
-    keep_layout: str = Form("false")
+    keep_layout: str = Form("false") 
 ):
-    print(f"🎨 Fix Request")
+    print(f"🎨 Fix Request using Llama 4")
     try:
-        # ✅ ใช้ 1.5 Flash เหมือนเดิม
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
         contents = await file.read()
-        
-        layout_instruction = "Maintain the main layout structure but update styles." if keep_layout == "true" else "You can modernize the layout."
+        base64_image = encode_image(contents)
 
-        prompt = f"""
-        Act as a UI Designer. Generate an SVG wireframe for {country} culture.
+        layout_instruction = "Maintain exact layout structure." if keep_layout == "true" else "Optimize layout slightly."
+
+        prompt_text = f"""
+        Act as a UI Designer. Create an SVG wireframe for {country} culture.
         Specs: {width}x{height}, Context: {context}, Desc: "{description}"
-        
-        CRITICAL RULES:
-        1. Output ONLY raw SVG code. NO markdown blocks.
-        2. Start immediately with <svg ...>
+        RULES:
+        1. Output ONLY raw SVG code. NO markdown.
+        2. Start immediately with <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 {width} {height}">
         3. {layout_instruction}
-        4. Make sure all text is visible.
+        4. Use cultural colors suitable for {country}.
         """
+
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            # ✅ ใช้ Llama 4 Maverick
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
+            temperature=0.2,
+            max_tokens=6000,
+        )
+
+        svg_code = chat_completion.choices[0].message.content
         
-        response = model.generate_content([{'mime_type': 'image/jpeg', 'data': contents}, prompt])
-        
-        print(f"🤖 AI SVG Response: {response.text[:50]}...")
-        
-        clean_svg = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
-        
+        clean_svg = svg_code.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
         if "<svg" in clean_svg:
             clean_svg = clean_svg[clean_svg.find("<svg"):]
         if "</svg>" in clean_svg:
             clean_svg = clean_svg[:clean_svg.find("</svg>")+6]
-
+            
+        print("✅ Fix Done")
         return {"svg": clean_svg}
 
     except Exception as e:
