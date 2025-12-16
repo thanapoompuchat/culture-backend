@@ -9,74 +9,75 @@ import re
 
 load_dotenv()
 
-# 🔑 ตั้งค่า Gemini API Key (อย่าลืมไปใส่ใน Render Environment Variable ชื่อ GEMINI_API_KEY นะครับ)
+# ✅ ตั้งค่า API Key
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     print("⚠️ Warning: GEMINI_API_KEY is missing")
 
 genai.configure(api_key=api_key)
 
-# ✅ ใช้ Gemini 1.5 Flash (เร็วและแม่นยำเรื่อง Layout มาก)
-# Config นี้ปรับให้มัน "ไม่มั่ว" (Temperature 0.1)
+# 🔥 ใช้โมเดล 'gemini-1.5-pro' (ฉลาดที่สุดในตระกูล 1.5)
+# Config นี้เน้นความแม่นยำ (Temperature ต่ำๆ)
 generation_config = {
-    "temperature": 0.1,
-    "top_p": 1,
-    "top_k": 32,
+    "temperature": 0.2,  
+    "top_p": 0.95,
+    "top_k": 40,
     "max_output_tokens": 8192,
 }
-model = genai.GenerativeModel(model_name="gemini-1.5-flash", generation_config=generation_config)
+
+# ถ้า Render ยังฟ้อง 404 อีก ให้ลองเปลี่ยนชื่อเป็น "gemini-1.5-pro-latest"
+model = genai.GenerativeModel(model_name="gemini-1.5-pro", generation_config=generation_config)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Culture AI (Gemini Engine) is Ready! 🚀"}
+    return {"status": "Culture AI (Gemini Pro Engine) is Ready! 🚀"}
 
 # --- Utility Functions ---
 def clean_svg_code(text):
-    # ฟังก์ชันกรอง SVG ให้สะอาดที่สุด ตัด Markdown ทิ้ง
+    # ฟังก์ชันกรอง SVG ให้สะอาดที่สุด (Clean Markdown & Dangerous Tags)
     match = re.search(r'(<svg[\s\S]*?</svg>)', text, re.IGNORECASE | re.DOTALL)
     if match:
         svg = match.group(1)
-        # ลบ tag ที่ Figma ไม่ชอบ
         svg = re.sub(r'```[a-z]*', '', svg)
         svg = svg.replace('```', '')
-        # ลบ foreignObject (ตัวทำ Figma เด้ง)
+        # ลบ Tag ที่ทำให้ Figma เด้ง
         svg = re.sub(r'<foreignObject[\s\S]*?</foreignObject>', '', svg, flags=re.IGNORECASE)
+        svg = re.sub(r'<image[\s\S]*?>', '', svg, flags=re.IGNORECASE) 
         return svg
     return text
 
-# --- 🧠 สมองส่วนวัฒนธรรม (Cultural Brain) ---
+# --- 🧠 สมองส่วนวัฒนธรรม (Cultural System) ---
 def get_culture_prompt(country):
-    # Design System ที่แม่นยำสำหรับแต่ละชาติ
     rules = {
         "Thailand": {
-            "style": "Friendly, Accessible, Colorful, High Information Density.",
-            "colors": "Primary: Vibrant Orange (#FF9F1C) or Blue (#2EC4B6). Background: White. Text: Dark Grey.",
-            "shapes": "Rounded corners (rx='12'). Soft drop shadows.",
-            "instruction": "Thai interfaces often pack a lot of information. Make buttons distinct and colorful."
+            "style": "Friendly, Colorful, Accessible. High Information Density.",
+            "colors": "Primary: Vibrant Orange (#FF9F1C) or Teal (#2EC4B6). Background: White or Cream.",
+            "shapes": "Rounded corners (rx='12'). Friendly icons with soft shadows.",
+            "instruction": "Thai users prefer colorful interfaces. Group information clearly. Use engaging visuals."
         },
         "Japan": {
-            "style": "Minimal, Clean, Trustworthy, Information-heavy but organized.",
+            "style": "Minimalist, Clean, Trustworthy, Highly Organized.",
             "colors": "Primary: Muted Blue (#2C3E50) or Soft Red. Background: White. Borders: Thin & Subtle.",
-            "shapes": "Square or slightly rounded (rx='4'). High usage of borders.",
-            "instruction": "Japanese interfaces rely on clear grids and high readability. Use smaller text but clear hierarchy."
+            "shapes": "Square or slightly rounded (rx='4'). Compact grids.",
+            "instruction": "Japanese UX relies on precision, clear grids, and high information density with high readability."
         },
         "China": {
-            "style": "Festive, Complex, Super-App vibe, Very High Density.",
+            "style": "Festive, Complex, Super-App Vibe, Maximum Density.",
             "colors": "Primary: Red (#D32F2F) and Gold (#FFC107).",
-            "shapes": "Complex icons, Compact buttons.",
-            "instruction": "Chinese apps maximize screen real estate. Small padding, many elements."
+            "shapes": "Compact buttons, complex icons, small padding.",
+            "instruction": "Maximize screen usage. Very small padding. Many entry points on one screen."
         },
         "USA": {
             "style": "Bold, Direct, Spacious, Minimalist.",
             "colors": "Primary: Royal Blue (#1D4ED8) or Black. High Contrast.",
             "shapes": "Large buttons, Sharp or Pill shapes.",
-            "instruction": "US interfaces love whitespace. Use big headings and clear Call-to-Actions."
+            "instruction": "Use ample whitespace (padding). Big headings. Clear hierarchy and Call-to-Actions."
         }
     }
-    return rules.get(country, rules["USA"]) # Default เป็น USA ถ้าหาไม่เจอ
+    return rules.get(country, rules["USA"])
 
 @app.post("/fix")
 async def fix_ui(
@@ -87,7 +88,7 @@ async def fix_ui(
     keep_layout: str = Form("true"),
     translate_text: str = Form("false")
 ):
-    print(f"🚀 Gemini Fixing UI: {country} | Keep Layout: {keep_layout}")
+    print(f"🚀 Gemini Pro Processing: {country} | Keep Layout: {keep_layout}")
     
     contents = await file.read()
     image = Image.open(io.BytesIO(contents))
@@ -95,66 +96,63 @@ async def fix_ui(
     culture_data = get_culture_prompt(country)
     is_keep_layout = keep_layout.lower() == 'true'
 
-    # 🔥 Prompt: แยกโหมดชัดเจน (Strict Layout vs Redesign)
+    # 🔥 Prompt ที่แบ่งโหมดชัดเจน
     if is_keep_layout:
-        # โหมด "คงเดิม" -> สั่งให้ดราฟต์
+        # 🟢 โหมด TRACING (เน้นคงโครงสร้าง)
         task_instruction = f"""
-        **TASK: TRACE AND ADAPT (Do not redesign)**
-        1. Look at the uploaded image. Identify every button, image, and text block.
-        2. **Generate SVG code that mirrors the EXACT POSITIONS (x, y)** of elements in the image.
-        3. Do NOT change the layout structure. If there is a grid of 6 cards, draw 6 cards in the same grid.
-        4. **ONLY CHANGE THE STYLING** (Colors, Border Radius, Font look) to match {country} culture:
+        **TASK: EXACT LAYOUT CLONING (TRACING)**
+        1. **VISUAL SCAN:** Count the exact number of columns and rows in the image.
+        2. **GEOMETRY:** Recreate the grid structure exactly. If there are 3 cards in a row, you MUST draw 3 rectangles.
+        3. **PRESERVATION:** Do NOT remove elements. Do NOT simplify layout into a list. Keep the spatial arrangement.
+        4. **ADAPTATION:** Only change the Styling to match {country}:
            - Colors: {culture_data['colors']}
            - Shapes: {culture_data['shapes']}
         """
     else:
-        # โหมด "ออกแบบใหม่" -> สั่งให้จัดวางใหม่
+        # 🟡 โหมด REDESIGN (รื้อใหม่)
         task_instruction = f"""
         **TASK: CULTURAL REDESIGN**
-        1. Analyze the content in the image.
-        2. **Re-layout the elements** to better fit {country} UX patterns:
+        1. Analyze the content hierarchy and purpose.
+        2. **RE-LAYOUT** the interface to fit {country} user habits:
            - {culture_data['style']}
            - {culture_data['instruction']}
-        3. You can move elements around to improve flow for {country} users.
+        3. You may rearrange elements, resize grids, or change navigation styles to optimize for {country}.
         """
 
-    # Final Prompt Assembly
+    # Final Prompt
     prompt = f"""
-    Act as a Senior UI Engineer specializing in SVG coding.
-    Target Canvas Size: width="{width}" height="{height}"
+    You are a Senior UI Engineer & SVG Specialist.
+    Target Canvas: width="{width}" height="{height}"
     
     {task_instruction}
 
     **TECHNICAL SVG RULES (STRICT):**
-    - Output **RAW SVG CODE ONLY**. No Markdown (```). No conversational text.
-    - Start with `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">`.
-    - Use `<rect>` for backgrounds, cards, and image placeholders (fill with gray #ddd).
-    - Use `<text>` for labels.
-    - **CRITICAL:** Do NOT use `<foreignObject>` or `<img>` tags. Use `<rect>` placeholders instead.
-    - Ensure all elements have sufficient contrast.
+    1. Output **RAW SVG CODE ONLY**. No Markdown. No comments.
+    2. Start with `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">`.
+    3. Use `<rect>` for all containers/cards. 
+       - Image placeholders: fill="#E0E0E0"
+       - Text lines: fill="#9CA3AF" (simulated text)
+    4. **CRITICAL:** Do NOT use `<foreignObject>` or `<img>`. They cause crashes in Figma.
+    5. Ensure high contrast and solid fills.
     
-    Generate the SVG now.
+    GENERATE THE SVG NOW.
     """
 
     try:
-        # ส่งรูป + คำสั่งไปให้ Gemini
+        # ส่งรูปให้ Gemini Pro
         response = model.generate_content([prompt, image])
+        clean_code = clean_svg_code(response.text)
         
-        raw_text = response.text
-        print(f"🤖 Gemini Output: {len(raw_text)} chars")
-        
-        clean_code = clean_svg_code(raw_text)
-        
-        # เช็คความถูกต้องเบื้องต้น
+        # เช็คว่าได้ SVG จริงไหม
         if "<svg" not in clean_code:
-            raise Exception("No SVG tag found")
+            raise Exception("AI did not generate valid SVG")
             
         return {"svg": clean_code}
 
     except Exception as e:
         print(f"❌ Error: {e}")
         # Fallback SVG กรณีฉุกเฉิน
-        return {"svg": f'<svg width="{width}" height="{height}" xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)"><rect width="100%" height="100%" fill="#fee2e2"/><text x="50%" y="50%" fill="red" font-family="Arial" text-anchor="middle">AI Error: {str(e)}</text></svg>'}
+        return {"svg": f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fee2e2"/><text x="50%" y="50%" fill="red" font-family="sans-serif" text-anchor="middle">Error: {str(e)}</text></svg>'}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
@@ -163,18 +161,11 @@ async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), con
         image = Image.open(io.BytesIO(contents))
         
         prompt = f"""
-        Act as a UX Cultural Expert for {country}. Context: {context}.
-        Analyze the attached UI design.
-        
-        Output ONLY HTML code (no markdown) with this structure:
-        <div class="score-container">
-            <div class="score-value">[Score 0-100]</div>
-        </div>
-        <ul class="issues">
-            <li>[Critical Issue 1 related to {country} culture]</li>
-            <li>[Critical Issue 2]</li>
-        </ul>
-        <div class="fix">Suggested Fix: [One specific actionable advice]</div>
+        Analyze this UI for {country} culture (Context: {context}).
+        Output HTML ONLY (no markdown):
+        <div class='score-container'><div class='score-value'>[Score 0-100]</div></div>
+        <ul class='issues'><li>[Cultural Issue 1]</li><li>[Cultural Issue 2]</li></ul>
+        <div class='fix'>[Main Suggestion]</div>
         """
         
         response = model.generate_content([prompt, image])
