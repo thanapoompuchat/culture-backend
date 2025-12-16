@@ -11,52 +11,36 @@ load_dotenv()
 
 # ✅ SETUP API KEY
 api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key: print("⚠️ Warning: GEMINI_API_KEY is missing")
+# ถ้าไม่มี Key ให้ใส่ค่าหลอกๆ ไปก่อน กันพัง
+if not api_key: 
+    print("⚠️ Warning: GEMINI_API_KEY is missing in Environment Variables")
+    api_key = "MISSING_KEY"
+
 genai.configure(api_key=api_key)
 
-# 🔥 SYSTEM: THE SURVIVOR (ระบบเอาตัวรอด)
-# พยายามหาโมเดลที่ใช้ได้จริงๆ ทีละตัว จนกว่าจะเจอ
-def get_working_model():
-    # เรียงลำดับจาก ฉลาดสุด -> ไปหาตัวที่ "ชัวร์สุด"
-    model_list = [
-        "gemini-1.5-pro-latest",  # ตัวเทพสุด
-        "gemini-1.5-pro",         
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-pro"              # ตัวกันตาย (รุ่นเก่าแต่เสถียร 100%)
-    ]
-    
-    print("🛡️ Starting Model Survival Check...")
-    
-    for model_name in model_list:
-        try:
-            print(f"🔄 Trying model: {model_name}...")
-            # ลองสร้างโมเดลหลอกๆ ขึ้นมาเทส
-            test_model = genai.GenerativeModel(model_name)
-            # ลองยิงคำถามโง่ๆ ไป 1 ทีเพื่อดูว่า Error 404 ไหม
-            test_model.count_tokens("test") 
-            
-            print(f"✅ SUCCESS! Connected to: {model_name}")
-            return genai.GenerativeModel(
-                model_name=model_name, 
-                generation_config={"temperature": 0.2, "max_output_tokens": 8192}
-            )
-        except Exception as e:
-            print(f"❌ {model_name} failed: {e}")
-            continue # ไปลองตัวถัดไป
-            
-    # ถ้าซวยจริงๆ หาไม่เจอสักตัว (เป็นไปไม่ได้ถ้า Key ถูก)
-    raise Exception("Critical: No Gemini models available with this API Key.")
-
-# Initialize Model (รันตอนเปิด Server)
-model = get_working_model()
-
+# 🔥 SYSTEM: LAZY LOADER (โหลดเมื่อใช้ ไม่โหลดตอนเริ่ม)
+# เราตัดระบบเช็คตอน Start ทิ้งไปเลยครับ จะได้ไม่ Error status 1
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Alive!"}
+    return {"status": "Alive! (Waiting for requests...)"}
+
+# ✅ Endpoint นี้เอาไว้เช็คว่า Key ใช้ได้จริงไหม (กดแล้วรู้เรื่องเลย)
+@app.get("/debug-key")
+def debug_key():
+    try:
+        # ลองเรียกโมเดลดู
+        m = genai.GenerativeModel("gemini-1.5-flash")
+        m.count_tokens("test")
+        return {"status": "OK", "message": "API Key is VALID ✅"}
+    except Exception as e:
+        return {
+            "status": "ERROR ❌", 
+            "reason": str(e),
+            "tip": "Check your API Key in Render Dashboard -> Environment"
+        }
 
 # --- CORE LOGIC ---
 def clean_svg_code(text):
@@ -76,34 +60,46 @@ async def fix_ui(
     height: str = Form("1024"),
     keep_layout: str = Form("true")
 ):
-    print(f"🚀 Processing: {country}")
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents))
-    
-    # Prompt แบบย่อ เพื่อลดโอกาส Error
-    prompt = f"""
-    Act as UI Engineer. Target: {width}x{height}
-    Task: Convert UI image to SVG.
-    Style: {country} culture.
-    Mode: {'Strict Layout Trace' if keep_layout == 'true' else 'Redesign'}.
-    
-    RULES:
-    1. Output RAW SVG ONLY. No Markdown.
-    2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">
-    3. Use <rect> only. No <img>. No <foreignObject>.
-    """
-
+    # ย้ายมาประกาศ Model ตรงนี้แทน (ถ้าพังก็พังแค่ตรงนี้ Server ไม่ดับ)
     try:
+        # พยายามใช้ Flash ก่อนเพื่อความเร็ว
+        model = genai.GenerativeModel("gemini-1.5-flash")
+    except:
+        model = genai.GenerativeModel("gemini-pro")
+
+    print(f"🚀 Processing: {country}")
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents))
+        
+        prompt = f"""
+        Act as UI Engineer. Target: {width}x{height}
+        Task: Convert UI image to SVG.
+        Style: {country} culture.
+        Mode: {'Strict Layout Trace' if keep_layout == 'true' else 'Redesign'}.
+        
+        RULES:
+        1. Output RAW SVG ONLY. No Markdown.
+        2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">
+        3. Use <rect> only. No <img>. No <foreignObject>.
+        """
+
         response = model.generate_content([prompt, image])
         clean = clean_svg_code(response.text)
-        if "<svg" not in clean: return {"svg": "Error: Invalid SVG"}
+        if "<svg" not in clean: return {"svg": "Error: Invalid SVG output from AI"}
         return {"svg": clean}
+
     except Exception as e:
-        return {"svg": f'<svg width="{width}" height="{height}"><text x="50" y="50">Error: {str(e)}</text></svg>'}
+        # ส่ง Error กลับไปบอกที่ Plugin เลย
+        error_msg = str(e)
+        if "400" in error_msg: error_msg = "API Key Invalid (400)"
+        if "403" in error_msg: error_msg = "API Key Permission Denied (403)"
+        return {"svg": f'<svg width="{width}" height="{height}"><text x="20" y="50" fill="red" font-size="20">Error: {error_msg}</text></svg>'}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
     try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         response = model.generate_content([f"Analyze for {country}. Output HTML only.", image])
