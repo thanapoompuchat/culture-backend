@@ -9,47 +9,65 @@ import re
 
 load_dotenv()
 
-# ✅ Check API Key
+# ✅ SETUP API KEY
 api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    print("⚠️ Warning: GEMINI_API_KEY is missing")
-    api_key = "MISSING_KEY" # ใส่กันไว้ไม่ให้แอป crash ตอน start
+if not api_key: print("⚠️ Warning: GEMINI_API_KEY is missing")
 
 genai.configure(api_key=api_key)
+
+# 🔥 SYSTEM: DYNAMIC MODEL FINDER (ระบบค้นหาโมเดลอัตโนมัติ)
+# ไม่ระบุชื่อตายตัว แต่ถาม Google ว่า "มีอะไรให้ใช้บ้าง"
+def get_available_model_name():
+    try:
+        print("🔍 Asking Google for available models...")
+        for m in genai.list_models():
+            # หาโมเดลที่รองรับการสร้างเนื้อหา (generateContent)
+            if 'generateContent' in m.supported_generation_methods:
+                name = m.name
+                # เอาชื่อที่สะอาดๆ (ตัด models/ ออกถ้ามี)
+                clean_name = name.replace("models/", "")
+                print(f"✅ Found working model: {clean_name}")
+                return clean_name
+    except Exception as e:
+        print(f"❌ Error listing models: {e}")
+        return None
+    return None
+
+# เลือกโมเดลเก็บไว้ในตัวแปร
+current_model_name = get_available_model_name()
+# ถ้าหาไม่เจอจริงๆ ให้ Default เป็น gemini-pro ไปก่อน
+if not current_model_name:
+    print("⚠️ No models found in list. Defaulting to 'gemini-1.5-flash'")
+    current_model_name = "gemini-1.5-flash"
+
+print(f"🚀 SYSTEM INITIALIZED WITH MODEL: {current_model_name}")
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 def read_root():
-    return {"status": "Culture AI (Legacy Mode) Ready 🚀"}
+    return {"status": f"Active using model: {current_model_name}"}
 
-# ✅ ฟังก์ชันเรียก AI แบบกันเหนียว (Safe Generate)
-def generate_content_safe(prompt_parts):
-    # 1. ลองตัว Flash ก่อน (เผื่อฟลุ๊ค)
+# ✅ Endpoint เช็คของ (กดดูได้เลยว่า Account พี่มีอะไรบ้าง)
+@app.get("/debug-models")
+def debug_models():
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        return model.generate_content(prompt_parts)
+        models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                models.append(m.name)
+        return {"my_models": models, "selected": current_model_name}
     except Exception as e:
-        print(f"⚠️ 1.5 Flash failed ({e})... Switching to Legacy gemini-pro")
-    
-    # 2. ถ้า 1.5 พัง ให้ใช้ "gemini-pro" (รุ่น 1.0) ทันที **ตัวนี้ไม่มีวัน 404**
-    try:
-        model = genai.GenerativeModel("gemini-pro") 
-        return model.generate_content(prompt_parts)
-    except Exception as e:
-        # ถ้ายังพังอีก คือ API Key ผิดชัวร์
-        raise Exception(f"All models failed. Check API Key. Error: {e}")
+        return {"error": str(e), "tip": "API Key might be invalid or has no access."}
 
-# --- Utility Functions ---
+# --- LOGIC ---
 def clean_svg_code(text):
-    # ฟังก์ชันทำความสะอาด SVG เหมือนเดิม
     match = re.search(r'(<svg[\s\S]*?</svg>)', text, re.IGNORECASE | re.DOTALL)
     if match:
         svg = match.group(1)
         svg = re.sub(r'```[a-z]*', '', svg).replace('```', '')
         svg = re.sub(r'<foreignObject[\s\S]*?</foreignObject>', '', svg, flags=re.IGNORECASE)
-        svg = re.sub(r'<image[\s\S]*?>', '', svg, flags=re.IGNORECASE) # เอา image ออกด้วย กัน error
         return svg
     return text
 
@@ -61,49 +79,36 @@ async def fix_ui(
     height: str = Form("1024"),
     keep_layout: str = Form("true")
 ):
-    print(f"🚀 Processing for {country} (Safe Mode)")
+    # ใช้โมเดลที่หาเจอตอน Start
+    model = genai.GenerativeModel(current_model_name)
     
+    print(f"🚀 Processing with {current_model_name}")
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         
-        # Prompt เดิม แต่กระชับขึ้น
         prompt = f"""
         Act as UI Engineer. Canvas: {width}x{height}
-        Task: Convert this UI image to raw SVG code.
-        Style Target: {country} culture.
-        Mode: {'Strict Layout Copy' if keep_layout == 'true' else 'Cultural Redesign'}.
-
-        **CRITICAL RULES:**
-        1. Output **ONLY** the RAW SVG code. Do not use Markdown blocks (```xml).
-        2. Start tag: <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 {width} {height}">
-        3. Use ONLY basic shapes: <rect>, <circle>, <path>, <text>.
-        4. **FORBIDDEN:** Do NOT use <img>, <image>, or <foreignObject>.
-        5. For images, just draw a gray <rect fill="#E0E0E0"/>.
+        Task: Convert UI to SVG. Style: {country}.
+        Mode: {'Strict Trace' if keep_layout == 'true' else 'Redesign'}.
+        RULES: RAW SVG ONLY. No Markdown. No <img>. Use <rect> placeholders.
         """
-
-        # 🔥 เรียกใช้ฟังก์ชันกันตาย
-        response = generate_content_safe([prompt, image])
         
-        clean_code = clean_svg_code(response.text)
-        if "<svg" not in clean_code:
-            return {"svg": '<svg><text x="20" y="50">Error: AI did not return SVG</text></svg>'}
-            
-        return {"svg": clean_code}
+        response = model.generate_content([prompt, image])
+        clean = clean_svg_code(response.text)
+        if "<svg" not in clean: return {"svg": "Error: AI output invalid"}
+        return {"svg": clean}
 
     except Exception as e:
-        print(f"❌ Final Error: {e}")
-        return {"svg": f'<svg width="{width}" height="{height}"><rect width="100%" height="100%" fill="#ffebee"/><text x="50%" y="50%" fill="red" font-size="20" text-anchor="middle">Error: {str(e)}</text></svg>'}
+        return {"svg": f'<svg width="{width}" height="{height}"><text x="20" y="50" fill="red">Error: {str(e)}</text></svg>'}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
     try:
+        model = genai.GenerativeModel(current_model_name)
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        
-        # 🔥 เรียกใช้ฟังก์ชันกันตาย
-        response = generate_content_safe([f"Analyze this UI for {country} context. Return HTML string only.", image])
-        
+        response = model.generate_content([f"Analyze for {country}", image])
         return {"result": response.text.replace("```html", "").replace("```", "")}
     except Exception as e:
         return {"result": f"Error: {str(e)}"}

@@ -76,6 +76,6 @@ fastapi
 uvicorn
 python-multipart
 python-dotenv
-google-generativeai
+google-generativeai>=0.8.3
 pillow
 requests
