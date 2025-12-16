@@ -11,15 +11,13 @@ load_dotenv()
 
 # ✅ SETUP API KEY
 api_key = os.environ.get("GEMINI_API_KEY")
-# ถ้าไม่มี Key ให้ใส่ค่าหลอกๆ ไปก่อน กันพัง
+# ถ้าไม่มี Key ใส่ค่าหลอกๆ ไปก่อน กันพัง
 if not api_key: 
-    print("⚠️ Warning: GEMINI_API_KEY is missing in Environment Variables")
+    print("⚠️ Warning: GEMINI_API_KEY is missing")
     api_key = "MISSING_KEY"
 
 genai.configure(api_key=api_key)
 
-# 🔥 SYSTEM: LAZY LOADER (โหลดเมื่อใช้ ไม่โหลดตอนเริ่ม)
-# เราตัดระบบเช็คตอน Start ทิ้งไปเลยครับ จะได้ไม่ Error status 1
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -27,22 +25,22 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def read_root():
     return {"status": "Alive! (Waiting for requests...)"}
 
-# ✅ Endpoint นี้เอาไว้เช็คว่า Key ใช้ได้จริงไหม (กดแล้วรู้เรื่องเลย)
-@app.get("/debug-key")
-def debug_key():
+# ✅ Endpoint ใหม่: เอาไว้เช็คกุญแจโดยเฉพาะ
+@app.get("/debug")
+def check_key():
     try:
-        # ลองเรียกโมเดลดู
+        # ลองแหย่ API ดูว่าผ่านไหม
         m = genai.GenerativeModel("gemini-1.5-flash")
         m.count_tokens("test")
-        return {"status": "OK", "message": "API Key is VALID ✅"}
+        return {"status": "PASS ✅", "message": "API Key is WORKING!"}
     except Exception as e:
         return {
-            "status": "ERROR ❌", 
-            "reason": str(e),
-            "tip": "Check your API Key in Render Dashboard -> Environment"
+            "status": "FAIL ❌", 
+            "error": str(e),
+            "tip": "Please check GEMINI_API_KEY in Render Dashboard"
         }
 
-# --- CORE LOGIC ---
+# --- LOGIC ---
 def clean_svg_code(text):
     match = re.search(r'(<svg[\s\S]*?</svg>)', text, re.IGNORECASE | re.DOTALL)
     if match:
@@ -60,14 +58,15 @@ async def fix_ui(
     height: str = Form("1024"),
     keep_layout: str = Form("true")
 ):
-    # ย้ายมาประกาศ Model ตรงนี้แทน (ถ้าพังก็พังแค่ตรงนี้ Server ไม่ดับ)
+    print(f"🚀 Processing: {country}")
+    
+    # ย้ายการเลือกโมเดลมาไว้ตรงนี้ (ถ้าพังก็พังแค่ตรงนี้ Server ไม่ดับ)
     try:
-        # พยายามใช้ Flash ก่อนเพื่อความเร็ว
+        # พยายามใช้ Flash ก่อน
         model = genai.GenerativeModel("gemini-1.5-flash")
     except:
         model = genai.GenerativeModel("gemini-pro")
 
-    print(f"🚀 Processing: {country}")
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
@@ -86,15 +85,12 @@ async def fix_ui(
 
         response = model.generate_content([prompt, image])
         clean = clean_svg_code(response.text)
-        if "<svg" not in clean: return {"svg": "Error: Invalid SVG output from AI"}
+        if "<svg" not in clean: return {"svg": "Error: Invalid SVG from AI"}
         return {"svg": clean}
 
     except Exception as e:
-        # ส่ง Error กลับไปบอกที่ Plugin เลย
-        error_msg = str(e)
-        if "400" in error_msg: error_msg = "API Key Invalid (400)"
-        if "403" in error_msg: error_msg = "API Key Permission Denied (403)"
-        return {"svg": f'<svg width="{width}" height="{height}"><text x="20" y="50" fill="red" font-size="20">Error: {error_msg}</text></svg>'}
+        # ถ้า Error ให้ส่งกลับไปบอก Plugin ตรงๆ
+        return {"svg": f'<svg width="{width}" height="{height}"><text x="20" y="50" fill="red" font-size="20">Server Error: {str(e)}</text></svg>'}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
@@ -102,7 +98,7 @@ async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), con
         model = genai.GenerativeModel("gemini-1.5-flash")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        response = model.generate_content([f"Analyze for {country}. Output HTML only.", image])
-        return {"result": response.text.replace("```html", "").replace("```", "")}
+        response = model.generate_content([f"Analyze for {country}", image])
+        return {"result": response.text}
     except Exception as e:
         return {"result": f"Error: {str(e)}"}
