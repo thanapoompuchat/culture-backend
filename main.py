@@ -9,12 +9,11 @@ import re
 
 load_dotenv()
 
-# ✅ SETUP API KEY
+# ✅ Check API Key
 api_key = os.environ.get("GEMINI_API_KEY")
-# ถ้าไม่มี Key ใส่ค่าหลอกๆ ไปก่อน กันพัง
-if not api_key: 
+if not api_key:
     print("⚠️ Warning: GEMINI_API_KEY is missing")
-    api_key = "MISSING_KEY"
+    api_key = "MISSING_KEY" # ใส่กันไว้ไม่ให้แอป crash ตอน start
 
 genai.configure(api_key=api_key)
 
@@ -23,30 +22,34 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def read_root():
-    return {"status": "Alive! (Waiting for requests...)"}
+    return {"status": "Culture AI (Legacy Mode) Ready 🚀"}
 
-# ✅ Endpoint ใหม่: เอาไว้เช็คกุญแจโดยเฉพาะ
-@app.get("/debug")
-def check_key():
+# ✅ ฟังก์ชันเรียก AI แบบกันเหนียว (Safe Generate)
+def generate_content_safe(prompt_parts):
+    # 1. ลองตัว Flash ก่อน (เผื่อฟลุ๊ค)
     try:
-        # ลองแหย่ API ดูว่าผ่านไหม
-        m = genai.GenerativeModel("gemini-1.5-flash")
-        m.count_tokens("test")
-        return {"status": "PASS ✅", "message": "API Key is WORKING!"}
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        return model.generate_content(prompt_parts)
     except Exception as e:
-        return {
-            "status": "FAIL ❌", 
-            "error": str(e),
-            "tip": "Please check GEMINI_API_KEY in Render Dashboard"
-        }
+        print(f"⚠️ 1.5 Flash failed ({e})... Switching to Legacy gemini-pro")
+    
+    # 2. ถ้า 1.5 พัง ให้ใช้ "gemini-pro" (รุ่น 1.0) ทันที **ตัวนี้ไม่มีวัน 404**
+    try:
+        model = genai.GenerativeModel("gemini-pro") 
+        return model.generate_content(prompt_parts)
+    except Exception as e:
+        # ถ้ายังพังอีก คือ API Key ผิดชัวร์
+        raise Exception(f"All models failed. Check API Key. Error: {e}")
 
-# --- LOGIC ---
+# --- Utility Functions ---
 def clean_svg_code(text):
+    # ฟังก์ชันทำความสะอาด SVG เหมือนเดิม
     match = re.search(r'(<svg[\s\S]*?</svg>)', text, re.IGNORECASE | re.DOTALL)
     if match:
         svg = match.group(1)
         svg = re.sub(r'```[a-z]*', '', svg).replace('```', '')
         svg = re.sub(r'<foreignObject[\s\S]*?</foreignObject>', '', svg, flags=re.IGNORECASE)
+        svg = re.sub(r'<image[\s\S]*?>', '', svg, flags=re.IGNORECASE) # เอา image ออกด้วย กัน error
         return svg
     return text
 
@@ -58,47 +61,49 @@ async def fix_ui(
     height: str = Form("1024"),
     keep_layout: str = Form("true")
 ):
-    print(f"🚀 Processing: {country}")
+    print(f"🚀 Processing for {country} (Safe Mode)")
     
-    # ย้ายการเลือกโมเดลมาไว้ตรงนี้ (ถ้าพังก็พังแค่ตรงนี้ Server ไม่ดับ)
-    try:
-        # พยายามใช้ Flash ก่อน
-        model = genai.GenerativeModel("gemini-1.5-flash")
-    except:
-        model = genai.GenerativeModel("gemini-pro")
-
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         
+        # Prompt เดิม แต่กระชับขึ้น
         prompt = f"""
-        Act as UI Engineer. Target: {width}x{height}
-        Task: Convert UI image to SVG.
-        Style: {country} culture.
-        Mode: {'Strict Layout Trace' if keep_layout == 'true' else 'Redesign'}.
-        
-        RULES:
-        1. Output RAW SVG ONLY. No Markdown.
-        2. Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">
-        3. Use <rect> only. No <img>. No <foreignObject>.
+        Act as UI Engineer. Canvas: {width}x{height}
+        Task: Convert this UI image to raw SVG code.
+        Style Target: {country} culture.
+        Mode: {'Strict Layout Copy' if keep_layout == 'true' else 'Cultural Redesign'}.
+
+        **CRITICAL RULES:**
+        1. Output **ONLY** the RAW SVG code. Do not use Markdown blocks (```xml).
+        2. Start tag: <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 {width} {height}">
+        3. Use ONLY basic shapes: <rect>, <circle>, <path>, <text>.
+        4. **FORBIDDEN:** Do NOT use <img>, <image>, or <foreignObject>.
+        5. For images, just draw a gray <rect fill="#E0E0E0"/>.
         """
 
-        response = model.generate_content([prompt, image])
-        clean = clean_svg_code(response.text)
-        if "<svg" not in clean: return {"svg": "Error: Invalid SVG from AI"}
-        return {"svg": clean}
+        # 🔥 เรียกใช้ฟังก์ชันกันตาย
+        response = generate_content_safe([prompt, image])
+        
+        clean_code = clean_svg_code(response.text)
+        if "<svg" not in clean_code:
+            return {"svg": '<svg><text x="20" y="50">Error: AI did not return SVG</text></svg>'}
+            
+        return {"svg": clean_code}
 
     except Exception as e:
-        # ถ้า Error ให้ส่งกลับไปบอก Plugin ตรงๆ
-        return {"svg": f'<svg width="{width}" height="{height}"><text x="20" y="50" fill="red" font-size="20">Server Error: {str(e)}</text></svg>'}
+        print(f"❌ Final Error: {e}")
+        return {"svg": f'<svg width="{width}" height="{height}"><rect width="100%" height="100%" fill="#ffebee"/><text x="50%" y="50%" fill="red" font-size="20" text-anchor="middle">Error: {str(e)}</text></svg>'}
 
 @app.post("/analyze")
 async def analyze_ui(file: UploadFile = File(...), country: str = Form(...), context: str = Form(...)):
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        response = model.generate_content([f"Analyze for {country}", image])
-        return {"result": response.text}
+        
+        # 🔥 เรียกใช้ฟังก์ชันกันตาย
+        response = generate_content_safe([f"Analyze this UI for {country} context. Return HTML string only.", image])
+        
+        return {"result": response.text.replace("```html", "").replace("```", "")}
     except Exception as e:
         return {"result": f"Error: {str(e)}"}
