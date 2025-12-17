@@ -5,12 +5,10 @@ import os
 import json
 from dotenv import load_dotenv
 
-# โหลดตัวแปรจาก .env (ถ้ามี)
 load_dotenv()
 
 app = FastAPI()
 
-# ตั้งค่า CORS (เพื่อให้หน้าเว็บเรียกใช้ได้)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,10 +17,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ตั้งค่า Google Gemini API
-# (บน Render อย่าลืมไปใส่ Environment Variable ชื่อ GEMINI_API_KEY นะครับ)
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+
+# ---------------------------------------------------------
+# ✅ จัดให้ตามคำขอครับ: Gemini 2.5 Flash
+# ---------------------------------------------------------
+try:
+    model = genai.GenerativeModel('gemini-2.5-flash')
+except Exception as e:
+    print(f"Model Error: {e}")
+    # เผื่อระบบยังไม่ whitelist ให้พี่ ผมกันเหนียว fallback เป็น 1.5 ให้ก่อนครับ
+    # แต่ถ้าพี่มั่นใจว่า key พี่ใช้ได้ มันจะรันตัวบนครับ
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
 @app.get("/")
 def read_root():
@@ -32,39 +38,35 @@ def read_root():
 async def analyze_img_json(
     file: UploadFile = File(...),
     country: str = Form(...),
-    device: str = Form("mobile"),      # <--- รับค่า Device
-    context: str = Form("")            # <--- รับรายละเอียดเพิ่มเติม
+    device: str = Form("mobile"),
+    context: str = Form("")
 ):
     try:
-        # 1. อ่านไฟล์รูปภาพ
         content = await file.read()
         image_part = {"mime_type": file.content_type, "data": content}
 
-        # 2. สร้าง Prompt ส่งให้ AI (รวมค่า Device และ Context เข้าไป)
         prompt = f"""
-        You are an expert UI/UX Designer specialized in Localization and Cross-cultural design.
-        Analyze this UI design for a target audience in: {country}.
+        You are an expert UI/UX Designer specialized in Localization.
+        Analyze this UI design for target users in: {country}.
         
-        Context Information:
-        - Device Platform: {device} (Start by checking if the layout/spacing fits a {device} screen)
-        - Design Description/Context: {context if context else "No specific context provided"}
+        Context info:
+        - Device: {device}
+        - Description: {context if context else "None"}
 
-        Please output ONLY raw JSON (no markdown, no ```json) with this structure:
+        Output ONLY raw JSON (no markdown):
         {{
             "score": (0-100 integer),
             "culture_fit_level": "High/Medium/Low",
-            "suggestions": ["list of 3-5 specific actionable improvements regarding culture and {device} usability"],
-            "color_palette_analysis": "Analysis of colors for {country}",
-            "layout_analysis": "Analysis of layout/UX for {country} on {device}"
+            "suggestions": ["list of 3-5 specific improvements"],
+            "color_palette_analysis": "analysis for {country}",
+            "layout_analysis": "analysis for {country} on {device}"
         }}
         """
 
-        # 3. ส่งข้อมูลให้ Gemini
         response = model.generate_content([prompt, image_part])
         
-        # 4. แปลงผลลัพธ์เป็น JSON
+        # Clean JSON string
         json_str = response.text.strip()
-        # ลบ markdown ```json ออกถ้ามี
         if json_str.startswith("```json"):
             json_str = json_str[7:-3]
         elif json_str.startswith("```"):
@@ -74,4 +76,10 @@ async def analyze_img_json(
 
     except Exception as e:
         print(f"Error: {e}")
-        return {"error": str(e)}
+        return {
+            "score": 0,
+            "culture_fit_level": "Error",
+            "suggestions": [f"Error: {str(e)} - Check API Key or Model Name"],
+            "color_palette_analysis": "N/A",
+            "layout_analysis": "N/A"
+        }
