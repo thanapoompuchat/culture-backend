@@ -19,20 +19,11 @@ app.add_middleware(
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# ---------------------------------------------------------
-# ✅ จัดให้ตามคำขอครับ: Gemini 2.5 Flash
-# ---------------------------------------------------------
+# พยายามใช้ตัวเทพสุดก่อน ถ้าไม่ได้ถอยไปตัวรอง
 try:
-    model = genai.GenerativeModel('gemini-2.5-flash')
-except Exception as e:
-    print(f"Model Error: {e}")
-    # เผื่อระบบยังไม่ whitelist ให้พี่ ผมกันเหนียว fallback เป็น 1.5 ให้ก่อนครับ
-    # แต่ถ้าพี่มั่นใจว่า key พี่ใช้ได้ มันจะรันตัวบนครับ
+    model = genai.GenerativeModel('gemini-1.5-pro') # Pro เก่งเรื่องวิเคราะห์ภาษา/สี มากกว่า Flash
+except:
     model = genai.GenerativeModel('gemini-1.5-flash')
-
-@app.get("/")
-def read_root():
-    return {"message": "Culture AI Backend is Running!"}
 
 @app.post("/analyze-json")
 async def analyze_img_json(
@@ -45,27 +36,37 @@ async def analyze_img_json(
         content = await file.read()
         image_part = {"mime_type": file.content_type, "data": content}
 
+        # 🧠 Prompt อัปเกรด: ขอ Style Guide และ Language Analysis
         prompt = f"""
-        You are an expert UI/UX Designer specialized in Localization.
-        Analyze this UI design for target users in: {country}.
+        You are a Senior UI/UX & Localization Expert.
+        Analyze this UI design for: {country}.
         
-        Context info:
-        - Device: {device}
+        Context:
+        - Platform: {device}
         - Description: {context if context else "None"}
+
+        Analyze deeply on:
+        1. Visual Culture (Colors, Layout, Symbols)
+        2. Language & Tone (Read text in image: Is it polite? formal? appropriate?)
+        3. Style Recommendations (Generate specific hex codes and font styles)
 
         Output ONLY raw JSON (no markdown):
         {{
             "score": (0-100 integer),
             "culture_fit_level": "High/Medium/Low",
-            "suggestions": ["list of 3-5 specific improvements"],
-            "color_palette_analysis": "analysis for {country}",
-            "layout_analysis": "analysis for {country} on {device}"
+            "suggestions": ["3-4 actionable UX improvements"],
+            "language_analysis": "Analyze the text/copywriting in the image. Is the tone appropriate for {country} culture? Any taboo words?",
+            "style_guide": {{
+                "recommended_colors": ["#Hex1", "#Hex2", "#Hex3"],
+                "recommended_fonts": ["Name of generic font style (e.g. Serif, Rounded)"],
+                "vibe_keywords": ["Keyword1", "Keyword2"]
+            }},
+            "layout_analysis": "Feedback on layout for {country} on {device}"
         }}
         """
 
         response = model.generate_content([prompt, image_part])
         
-        # Clean JSON string
         json_str = response.text.strip()
         if json_str.startswith("```json"):
             json_str = json_str[7:-3]
@@ -76,10 +77,4 @@ async def analyze_img_json(
 
     except Exception as e:
         print(f"Error: {e}")
-        return {
-            "score": 0,
-            "culture_fit_level": "Error",
-            "suggestions": [f"Error: {str(e)} - Check API Key or Model Name"],
-            "color_palette_analysis": "N/A",
-            "layout_analysis": "N/A"
-        }
+        return {"error": str(e)}
