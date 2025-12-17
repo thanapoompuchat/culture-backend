@@ -19,10 +19,15 @@ app.add_middleware(
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# พยายามใช้ตัวเทพสุดก่อน ถ้าไม่ได้ถอยไปตัวรอง
+# --- UPDATE: ใช้ Gemini 2.5 Flash (Latest Stable 2025) ---
+# ตัวนี้ไวและฉลาดกว่า 1.5/2.0 ครับ
+MODEL_NAME = 'gemini-2.5-flash' 
+
 try:
-    model = genai.GenerativeModel('gemini-1.5-pro') # Pro เก่งเรื่องวิเคราะห์ภาษา/สี มากกว่า Flash
-except:
+    model = genai.GenerativeModel(MODEL_NAME)
+except Exception as e:
+    print(f"Error loading model {MODEL_NAME}: {e}")
+    # Fallback เผื่อ API Key พี่เก่ายังไม่เปิด Access (แต่ปกติ 2.5 เปิด public แล้ว)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
 @app.post("/analyze-json")
@@ -36,10 +41,10 @@ async def analyze_img_json(
         content = await file.read()
         image_part = {"mime_type": file.content_type, "data": content}
 
-        # 🧠 Prompt อัปเกรด: ขอ Style Guide และ Language Analysis
+        # Prompt จูนให้เข้ากับความฉลาดของ 2.5 Flash
         prompt = f"""
-        You are a Senior UI/UX & Localization Expert.
-        Analyze this UI design for: {country}.
+        You are a Senior UI/UX & Localization Expert using Gemini 2.5 capabilities.
+        Analyze this UI design for target market: {country}.
         
         Context:
         - Platform: {device}
