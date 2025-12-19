@@ -1,8 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
 import google.generativeai as genai
-import os
 import json
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,69 +19,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# ตั้งค่า API KEY
+GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+genai.configure(api_key=GENAI_API_KEY)
 
-# --- UPDATE: ใช้ Gemini 2.5 Flash (Latest Stable 2025) ---
-# ตัวนี้ไวและฉลาดกว่า 1.5/2.0 ครับ
-MODEL_NAME = 'gemini-2.5-flash' 
+class StyleGuide(BaseModel):
+    recommended_colors: List[str]
+    recommended_fonts: List[str]
+    vibe_keywords: List[str]
 
-try:
-    model = genai.GenerativeModel(MODEL_NAME)
-except Exception as e:
-    print(f"Error loading model {MODEL_NAME}: {e}")
-    # Fallback เผื่อ API Key พี่เก่ายังไม่เปิด Access (แต่ปกติ 2.5 เปิด public แล้ว)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+class AnalysisResult(BaseModel):
+    score: int
+    language_analysis: str
+    suggestions: List[str]
+    style_guide: StyleGuide
+    persona_used: Optional[str] = None # ส่งกลับไปให้ frontend โชว์
 
-@app.post("/analyze-json")
-async def analyze_img_json(
+@app.post("/analyze-json", response_model=AnalysisResult)
+async def analyze_json(
     file: UploadFile = File(...),
     country: str = Form(...),
-    device: str = Form("mobile"),
-    context: str = Form("")
+    device: str = Form(...),
+    context: str = Form(""),
+    industry: str = Form("General"),      # รับค่า Industry
+    persona: str = Form("General User")   # รับค่า Persona
 ):
+    
+    # อ่านไฟล์ภาพ
+    image_bytes = await file.read()
+    
+    # Prompt เทพ (อัปเกรดแล้ว)
+    prompt = f"""
+    You are an expert UX/UI Consultant specialized in Localized Design for the market: {country}.
+    
+    YOUR ROLE:
+    - You must act as a "{persona}" user in {country}. Adopt their mindset, pain points, and tech-literacy level.
+    - You must judge the design based on standard practices for the "{industry}" industry (e.g., if Fintech: focus on trust/security. if Gen Z: focus on vibe/speed).
+
+    TASK:
+    Analyze the attached UI image (Platform: {device}).
+    Context provided by user: "{context}"
+
+    Analyze deeply on:
+    1. Visual Culture: Do the colors, symbols, and layout fit {country}'s norms for a {industry} app?
+    2. Usability for Persona: Is this design easy or appealing for a "{persona}"? (e.g., text size for seniors, navigation for non-tech users).
+    3. Language: Is the tone appropriate for {country} and this industry?
+
+    Output ONLY raw JSON format with these fields:
+    - score: (0-100) How well it fits {country}'s culture AND the {persona}'s needs.
+    - language_analysis: Critique the text/language. Speak as the expert consultant.
+    - suggestions: List 3-4 specific improvements for this persona/industry.
+    - style_guide: {{
+        "recommended_colors": ["#hex", "#hex", ...],
+        "recommended_fonts": ["FontName", ...],
+        "vibe_keywords": ["keyword", ...]
+    }}
+    """
+
+    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    
+    response = model.generate_content([
+        {"mime_type": "image/jpeg", "data": image_bytes},
+        prompt
+    ])
+
+    # Clean JSON
+    raw_text = response.text.replace("```json", "").replace("```", "").strip()
+    
     try:
-        content = await file.read()
-        image_part = {"mime_type": file.content_type, "data": content}
+        data = json.loads(raw_text)
+        # เติม persona กลับไปให้ frontend
+        data['persona_used'] = persona 
+        return data
+    except json.JSONDecodeError:
+        return {
+            "score": 0,
+            "language_analysis": "Error parsing AI response.",
+            "suggestions": ["Try again."],
+            "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
+            "persona_used": persona
+        }
 
-        # Prompt จูนให้เข้ากับความฉลาดของ 2.5 Flash
-        prompt = f"""
-        You are a Senior UI/UX & Localization Expert using Gemini 2.5 capabilities.
-        Analyze this UI design for target market: {country}.
-        
-        Context:
-        - Platform: {device}
-        - Description: {context if context else "None"}
-
-        Analyze deeply on:
-        1. Visual Culture (Colors, Layout, Symbols)
-        2. Language & Tone (Read text in image: Is it polite? formal? appropriate?)
-        3. Style Recommendations (Generate specific hex codes and font styles)
-
-        Output ONLY raw JSON (no markdown):
-        {{
-            "score": (0-100 integer),
-            "culture_fit_level": "High/Medium/Low",
-            "suggestions": ["3-4 actionable UX improvements"],
-            "language_analysis": "Analyze the text/copywriting in the image. Is the tone appropriate for {country} culture? Any taboo words?",
-            "style_guide": {{
-                "recommended_colors": ["#Hex1", "#Hex2", "#Hex3"],
-                "recommended_fonts": ["Name of generic font style (e.g. Serif, Rounded)"],
-                "vibe_keywords": ["Keyword1", "Keyword2"]
-            }},
-            "layout_analysis": "Feedback on layout for {country} on {device}"
-        }}
-        """
-
-        response = model.generate_content([prompt, image_part])
-        
-        json_str = response.text.strip()
-        if json_str.startswith("```json"):
-            json_str = json_str[7:-3]
-        elif json_str.startswith("```"):
-            json_str = json_str[3:-3]
-            
-        return json.loads(json_str)
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return {"error": str(e)}
+@app.get("/")
+def read_root():
+    return {"status": "CultureAI API is running (Enhanced Version)"}
