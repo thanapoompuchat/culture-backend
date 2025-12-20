@@ -3,9 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted, InternalServerError # เพิ่ม import นี้
 import json
 import os
 from dotenv import load_dotenv
+import asyncio 
 
 load_dotenv()
 
@@ -19,9 +21,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ตั้งค่า API KEY
+# ใช้ตัวเทพตัวเดิมของพี่
 GENAI_API_KEY = os.getenv("GENAI_API_KEY")
 genai.configure(api_key=GENAI_API_KEY)
+
+# ✅ ยืนยันใช้ 2.0 ตามที่พี่ต้องการ (เพราะ 1.5 มันกาก)
+model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
 class StyleGuide(BaseModel):
     recommended_colors: List[str]
@@ -33,7 +38,7 @@ class AnalysisResult(BaseModel):
     language_analysis: str
     suggestions: List[str]
     style_guide: StyleGuide
-    persona_used: Optional[str] = None # ส่งกลับไปให้ frontend โชว์
+    persona_used: Optional[str] = None
 
 @app.post("/analyze-json", response_model=AnalysisResult)
 async def analyze_json(
@@ -41,65 +46,67 @@ async def analyze_json(
     country: str = Form(...),
     device: str = Form(...),
     context: str = Form(""),
-    industry: str = Form("General"),      # รับค่า Industry
-    persona: str = Form("General User")   # รับค่า Persona
+    industry: str = Form("General"),
+    persona: str = Form("General User")
 ):
-    
-    # อ่านไฟล์ภาพ
     image_bytes = await file.read()
     
-    # Prompt เทพ (อัปเกรดแล้ว)
     prompt = f"""
     You are an expert UX/UI Consultant specialized in Localized Design for the market: {country}.
     
     YOUR ROLE:
     - You must act as a "{persona}" user in {country}. Adopt their mindset, pain points, and tech-literacy level.
-    - You must judge the design based on standard practices for the "{industry}" industry (e.g., if Fintech: focus on trust/security. if Gen Z: focus on vibe/speed).
+    - You must judge the design based on standard practices for the "{industry}" industry.
 
     TASK:
     Analyze the attached UI image (Platform: {device}).
-    Context provided by user: "{context}"
-
-    Analyze deeply on:
-    1. Visual Culture: Do the colors, symbols, and layout fit {country}'s norms for a {industry} app?
-    2. Usability for Persona: Is this design easy or appealing for a "{persona}"? (e.g., text size for seniors, navigation for non-tech users).
-    3. Language: Is the tone appropriate for {country} and this industry?
+    Context: "{context}"
 
     Output ONLY raw JSON format with these fields:
     - score: (0-100) How well it fits {country}'s culture AND the {persona}'s needs.
     - language_analysis: Critique the text/language. Speak as the expert consultant.
     - suggestions: List 3-4 specific improvements for this persona/industry.
     - style_guide: {{
-        "recommended_colors": ["#hex", "#hex", ...],
+        "recommended_colors": ["#hex", ...],
         "recommended_fonts": ["FontName", ...],
         "vibe_keywords": ["keyword", ...]
     }}
     """
 
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-    
-    response = model.generate_content([
-        {"mime_type": "image/jpeg", "data": image_bytes},
-        prompt
-    ])
-
-    # Clean JSON
-    raw_text = response.text.replace("```json", "").replace("```", "").strip()
-    
     try:
+        # ยิงไปหา AI
+        response = model.generate_content([
+            {"mime_type": "image/jpeg", "data": image_bytes},
+            prompt
+        ])
+        
+        raw_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw_text)
-        # เติม persona กลับไปให้ frontend
         data['persona_used'] = persona 
         return data
-    except json.JSONDecodeError:
+
+    except ResourceExhausted:
+        # ⚠️ จับ error เวลาโควต้าเต็ม (429)
+        print("Quota exceeded! Please wait.")
         return {
             "score": 0,
-            "language_analysis": "Error parsing AI response.",
-            "suggestions": ["Try again."],
+            "language_analysis": "🚨 Server Busy (Google Quota Limit). Please wait 1 minute and try again.",
+            "suggestions": ["The AI model is currently cooling down.", "Please retry in 60 seconds."],
+            "style_guide": {
+                "recommended_colors": ["#333333"], 
+                "recommended_fonts": ["System"], 
+                "vibe_keywords": ["Busy"]
+            },
+            "persona_used": persona
+        }
+    
+    except Exception as e:
+        # จับ Error อื่นๆ
+        print(f"Error: {e}")
+        return {
+            "score": 0,
+            "language_analysis": "System Error. Please try again.",
+            "suggestions": [str(e)],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
         }
-
-@app.get("/")
-def read_root():
-    return {"status": "CultureAI API is running (Enhanced Version)"}
