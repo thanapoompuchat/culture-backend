@@ -35,8 +35,6 @@ else:
 
 print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
 
-# ✅✅✅ แก้ให้แล้วครับ: ใช้ Gemini 2.5 Flash ตามที่พี่สั่ง
-# ตัว 1.5 มันเก่าไปจนหาไม่เจอแล้ว และ 2.0 exp ก็โดนปิด
 MODEL_NAME = "gemini-2.5-flash"
 
 async def generate_with_smart_rotation(content_parts):
@@ -50,23 +48,18 @@ async def generate_with_smart_rotation(content_parts):
         try:
             genai.configure(api_key=key)
             model = genai.GenerativeModel(MODEL_NAME)
-            
-            # ยิง API
             response = await model.generate_content_async(content_parts)
             return response
-
         except (ResourceExhausted, ServiceUnavailable) as e:
-            # print(f"⚠️ Key ...{key[-4:]} BUSY. Switching...")
             last_error = e
             continue
-            
         except Exception as e:
-            # print(f"❌ Error on key ...{key[-4:]}: {e}")
             last_error = e
             continue
 
     raise Exception(f"All keys exhausted. Last error: {last_error}")
 
+# ... (Class Models เหมือนเดิม)
 class StyleGuide(BaseModel):
     recommended_colors: List[str]
     recommended_fonts: List[str]
@@ -89,8 +82,13 @@ async def analyze_json(
     persona: str = Form("General User")
 ):
     try:
+        # ✅ อ่านไฟล์รูป
         image_bytes = await file.read()
         
+        # ✅✅✅ แก้ตรงนี้: ให้ใช้ Mime Type จริงจากไฟล์ที่อัปโหลดมา (เช่น image/png, image/heic)
+        # มือถือชอบส่ง PNG หรือ HEIC มา ถ้าเราบังคับ JPEG มันจะพัง
+        mime_type = file.content_type if file.content_type else "image/jpeg"
+
         prompt = f"""
         You are an expert UX/UI Consultant for {country}.
         Role: {persona}. Industry: {industry}.
@@ -110,13 +108,13 @@ async def analyze_json(
         }}
         """
 
+        # ส่ง Mime Type ที่ถูกต้องไปให้ AI
         response = await generate_with_smart_rotation([
-            {"mime_type": "image/jpeg", "data": image_bytes},
+            {"mime_type": mime_type, "data": image_bytes},
             prompt
         ])
         
         raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}") + 1
         json_str = raw_text[start_idx:end_idx] if start_idx != -1 else raw_text
@@ -130,7 +128,7 @@ async def analyze_json(
         return {
             "score": 0,
             "language_analysis": f"Error: {str(e)}",
-            "suggestions": ["Please check server logs."],
+            "suggestions": ["Check file format or Server Logs."],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
         }
