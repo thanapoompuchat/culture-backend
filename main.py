@@ -3,12 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted, InternalServerError # เพิ่ม import นี้
+from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable, InternalServerError
 import json
 import os
+import random
+import asyncio
 from dotenv import load_dotenv
-import asyncio 
 
+# โหลดตัวแปรจากไฟล์ .env (สำหรับรันในเครื่อง)
 load_dotenv()
 
 app = FastAPI()
@@ -21,13 +23,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ใช้ตัวเทพตัวเดิมของพี่
-GENAI_API_KEY = os.getenv("GENAI_API_KEY")
-genai.configure(api_key=GENAI_API_KEY)
+# ==============================================================================
+# ⚙️ SYSTEM SETUP: โหลด 10 API Keys
+# ==============================================================================
+# ดึง String ยาวๆ มาจาก Environment
+keys_string = os.getenv("GEMINI_API_KEYS")
 
-# ✅ ยืนยันใช้ 2.0 ตามที่พี่ต้องการ (เพราะ 1.5 มันกาก)
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+if keys_string:
+    # แยกด้วยลูกน้ำ (,) และตัดช่องว่างออก
+    VALID_KEYS = [k.strip() for k in keys_string.split(",") if k.strip()]
+else:
+    # กันเหนียว: กรณีลืมตั้งค่า ให้ลองหา key เดี่ยวๆ
+    fallback_key = os.getenv("GENAI_API_KEY")
+    VALID_KEYS = [fallback_key] if fallback_key else []
 
+print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
+
+# ใช้โมเดลตัว TOP สุด
+MODEL_NAME = "gemini-2.0-flash-exp"
+
+# ฟังก์ชันสลับคีย์อัตโนมัติ (The Magic Function)
+async def generate_with_smart_rotation(content_parts):
+    if not VALID_KEYS:
+        raise Exception("No API Keys found in configuration!")
+
+    # 1. เทคนิค Shuffle: สุ่มลำดับใหม่ทุกครั้ง เพื่อไม่ให้ Key ตัวแรกรับภาระหนักสุด
+    # เช่น รอบนี้ลำดับอาจเป็น [Key9, Key2, Key5, ...]
+    shuffled_keys = random.sample(VALID_KEYS, len(VALID_KEYS))
+    
+    last_error = None
+
+    # 2. วนลูปไล่ลองทีละคีย์
+    for i, key in enumerate(shuffled_keys):
+        try:
+            # log บอกหน่อยว่าใช้คีย์ไหน (ดู 4 ตัวท้าย)
+            # print(f"🔄 Attempt {i+1}/{len(VALID_KEYS)}: Using Key ...{key[-4:]}")
+            
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(MODEL_NAME)
+            
+            # ยิง API
+            response = await model.generate_content_async(content_parts)
+            
+            # ถ้าผ่าน ส่งของกลับเลย!
+            return response
+
+        except (ResourceExhausted, ServiceUnavailable) as e:
+            # ถ้าคีย์นี้เต็ม (429) หรือเซิฟล่ม (503) -> ข้ามไปตัวต่อไปทันที!
+            print(f"⚠️ Key ...{key[-4:]} is BUSY/EXHAUSTED. Switching...")
+            last_error = e
+            continue
+            
+        except Exception as e:
+            # ถ้า Error แปลกๆ ก็ข้ามเหมือนกัน
+            print(f"❌ Error on key ...{key[-4:]}: {e}")
+            last_error = e
+            continue
+
+    # 3. ถ้าซวยจัดๆ วนครบ 10 คีย์แล้วยังไม่ได้ (โอกาสน้อยมาก)
+    raise Exception(f"All {len(VALID_KEYS)} keys are exhausted/busy. Last error: {last_error}")
+
+# ==============================================================================
+# 📦 DATA MODELS
+# ==============================================================================
 class StyleGuide(BaseModel):
     recommended_colors: List[str]
     recommended_fonts: List[str]
@@ -40,6 +98,9 @@ class AnalysisResult(BaseModel):
     style_guide: StyleGuide
     persona_used: Optional[str] = None
 
+# ==============================================================================
+# 🚀 API ENDPOINT
+# ==============================================================================
 @app.post("/analyze-json", response_model=AnalysisResult)
 async def analyze_json(
     file: UploadFile = File(...),
@@ -49,64 +110,56 @@ async def analyze_json(
     industry: str = Form("General"),
     persona: str = Form("General User")
 ):
-    image_bytes = await file.read()
-    
-    prompt = f"""
-    You are an expert UX/UI Consultant specialized in Localized Design for the market: {country}.
-    
-    YOUR ROLE:
-    - You must act as a "{persona}" user in {country}. Adopt their mindset, pain points, and tech-literacy level.
-    - You must judge the design based on standard practices for the "{industry}" industry.
-
-    TASK:
-    Analyze the attached UI image (Platform: {device}).
-    Context: "{context}"
-
-    Output ONLY raw JSON format with these fields:
-    - score: (0-100) How well it fits {country}'s culture AND the {persona}'s needs.
-    - language_analysis: Critique the text/language. Speak as the expert consultant.
-    - suggestions: List 3-4 specific improvements for this persona/industry.
-    - style_guide: {{
-        "recommended_colors": ["#hex", ...],
-        "recommended_fonts": ["FontName", ...],
-        "vibe_keywords": ["keyword", ...]
-    }}
-    """
-
     try:
-        # ยิงไปหา AI
-        response = model.generate_content([
+        image_bytes = await file.read()
+        
+        prompt = f"""
+        You are an expert UX/UI Consultant specialized in Localized Design for: {country}.
+        Role: {persona}. Industry: {industry}.
+        Task: Analyze the attached UI image (Platform: {device}).
+        Context: "{context}"
+
+        Output ONLY raw JSON format (no markdown code blocks):
+        {{
+            "score": (integer 0-100),
+            "language_analysis": "Critique language/grammar usage for {country}.",
+            "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
+            "style_guide": {{
+                "recommended_colors": ["#hex", "#hex"],
+                "recommended_fonts": ["font_name"],
+                "vibe_keywords": ["keyword"]
+            }}
+        }}
+        """
+
+        # เรียกใช้ระบบหมุนคีย์ 10 ร่าง
+        response = await generate_with_smart_rotation([
             {"mime_type": "image/jpeg", "data": image_bytes},
             prompt
         ])
         
+        # Clean ข้อมูลเผื่อ AI ใส่ Markdown มา
         raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(raw_text)
+        
+        # หาปีกกาเปิดปิด เพื่อเอาแค่ JSON เนื้อๆ
+        start_idx = raw_text.find("{")
+        end_idx = raw_text.rfind("}") + 1
+        if start_idx != -1 and end_idx != -1:
+             json_str = raw_text[start_idx:end_idx]
+        else:
+             json_str = raw_text
+
+        data = json.loads(json_str)
         data['persona_used'] = persona 
         return data
 
-    except ResourceExhausted:
-        # ⚠️ จับ error เวลาโควต้าเต็ม (429)
-        print("Quota exceeded! Please wait.")
-        return {
-            "score": 0,
-            "language_analysis": "🚨 Server Busy (Google Quota Limit). Please wait 1 minute and try again.",
-            "suggestions": ["The AI model is currently cooling down.", "Please retry in 60 seconds."],
-            "style_guide": {
-                "recommended_colors": ["#333333"], 
-                "recommended_fonts": ["System"], 
-                "vibe_keywords": ["Busy"]
-            },
-            "persona_used": persona
-        }
-    
     except Exception as e:
-        # จับ Error อื่นๆ
-        print(f"Error: {e}")
+        print(f"🔥 FINAL ERROR: {e}")
+        # Return fallback json ถ้าพังจริงๆ (กันหน้าขาว)
         return {
             "score": 0,
-            "language_analysis": "System Error. Please try again.",
-            "suggestions": [str(e)],
+            "language_analysis": "System is currently experiencing heavy traffic. Please try again in a few seconds.",
+            "suggestions": ["Click Analyze again."],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
         }
