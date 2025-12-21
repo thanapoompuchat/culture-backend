@@ -35,9 +35,9 @@ else:
 
 print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
 
-# ✅✅✅ ใช้ตัวนี้ครับ "gemini-1.5-flash-8b"
-# เป็นตัวใหม่ล่าสุดที่เสถียร (Google เรียกว่า Flash-8b) เร็วและประหยัดกว่า Flash ปกติ
-MODEL_NAME = "gemini-1.5-flash-8b"
+# ✅ จัดให้ตามคำขอครับพี่: Gemini 2.0 Flash (Experimental)
+# ตัวนี้คือตัวใหม่ล่าสุดที่มีให้ใช้ตอนนี้ครับ (Google ยังไม่ปล่อยชื่อ 2.5 ออกมาในโค้ดครับ แต่ตัวนี้คือตัว Flash ใหม่สุดครับ)
+MODEL_NAME = "gemini-2.0-flash-exp"
 
 async def generate_with_smart_rotation(content_parts):
     if not VALID_KEYS:
@@ -129,8 +129,8 @@ async def analyze_json(
         print(f"🔥 FINAL ERROR: {e}")
         return {
             "score": 0,
-            "language_analysis": "System Error. Please try updating google-generativeai.",
-            "suggestions": ["Run: pip install -U google-generativeai"],
+            "language_analysis": "Error: " + str(e),
+            "suggestions": ["Please check server logs."],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
         }
