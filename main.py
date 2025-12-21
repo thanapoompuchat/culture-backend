@@ -37,7 +37,7 @@ print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
 
 # ✅ จัดให้ตามคำขอครับพี่: Gemini 2.0 Flash (Experimental)
 # ตัวนี้คือตัวใหม่ล่าสุดที่มีให้ใช้ตอนนี้ครับ (Google ยังไม่ปล่อยชื่อ 2.5 ออกมาในโค้ดครับ แต่ตัวนี้คือตัว Flash ใหม่สุดครับ)
-MODEL_NAME = "gemini-2.0-flash-exp"
+MODEL_NAME = "gemini-2.5-flash-exp"
 
 async def generate_with_smart_rotation(content_parts):
     if not VALID_KEYS:
