@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 # ==============================================================================
-# ⚙️ SYSTEM SETUP: โหลด 10 API Keys
+# ⚙️ SYSTEM SETUP
 # ==============================================================================
 keys_string = os.getenv("GEMINI_API_KEYS")
 
@@ -35,8 +35,9 @@ else:
 
 print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
 
-# ✅✅✅ แก้แล้ว: ใช้ Gemini 1.5 Flash (ตัวเสถียร) แทนตัวทดลอง
-MODEL_NAME = "gemini-1.5-flash" 
+# ✅✅✅ ใช้ตัวนี้ครับ "gemini-1.5-flash-8b"
+# เป็นตัวใหม่ล่าสุดที่เสถียร (Google เรียกว่า Flash-8b) เร็วและประหยัดกว่า Flash ปกติ
+MODEL_NAME = "gemini-1.5-flash-8b"
 
 async def generate_with_smart_rotation(content_parts):
     if not VALID_KEYS:
@@ -55,12 +56,12 @@ async def generate_with_smart_rotation(content_parts):
             return response
 
         except (ResourceExhausted, ServiceUnavailable) as e:
-            print(f"⚠️ Key ...{key[-4:]} BUSY. Switching...")
+            # print(f"⚠️ Key ...{key[-4:]} BUSY. Switching...")
             last_error = e
             continue
             
         except Exception as e:
-            print(f"❌ Error on key ...{key[-4:]}: {e}")
+            # print(f"❌ Error on key ...{key[-4:]}: {e}")
             last_error = e
             continue
 
@@ -128,8 +129,8 @@ async def analyze_json(
         print(f"🔥 FINAL ERROR: {e}")
         return {
             "score": 0,
-            "language_analysis": "System Busy. Please try again.",
-            "suggestions": ["Try again."],
+            "language_analysis": "System Error. Please try updating google-generativeai.",
+            "suggestions": ["Run: pip install -U google-generativeai"],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
         }
