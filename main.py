@@ -35,9 +35,9 @@ else:
 
 print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
 
-# ✅ จัดให้ตามคำขอครับพี่: Gemini 2.0 Flash (Experimental)
-# ตัวนี้คือตัวใหม่ล่าสุดที่มีให้ใช้ตอนนี้ครับ (Google ยังไม่ปล่อยชื่อ 2.5 ออกมาในโค้ดครับ แต่ตัวนี้คือตัว Flash ใหม่สุดครับ)
-MODEL_NAME = "gemini-2.5-flash-exp"
+# ✅✅✅ แก้ให้แล้วครับ: ใช้ Gemini 2.5 Flash ตามที่พี่สั่ง
+# ตัว 1.5 มันเก่าไปจนหาไม่เจอแล้ว และ 2.0 exp ก็โดนปิด
+MODEL_NAME = "gemini-2.5-flash"
 
 async def generate_with_smart_rotation(content_parts):
     if not VALID_KEYS:
@@ -129,7 +129,7 @@ async def analyze_json(
         print(f"🔥 FINAL ERROR: {e}")
         return {
             "score": 0,
-            "language_analysis": "Error: " + str(e),
+            "language_analysis": f"Error: {str(e)}",
             "suggestions": ["Please check server logs."],
             "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
             "persona_used": persona
