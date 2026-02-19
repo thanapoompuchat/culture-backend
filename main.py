@@ -1,13 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable, InternalServerError
 import json
 import os
 import random
-import asyncio
+import io
+from PIL import Image
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,113 +20,118 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==============================================================================
-# ⚙️ SYSTEM SETUP
-# ==============================================================================
 keys_string = os.getenv("GEMINI_API_KEYS")
-
 if keys_string:
     VALID_KEYS = [k.strip() for k in keys_string.split(",") if k.strip()]
 else:
-    fallback_key = os.getenv("GENAI_API_KEY")
+    fallback_key = os.getenv("GEMINI_API_KEY") 
     VALID_KEYS = [fallback_key] if fallback_key else []
 
-print(f"🔥 ACTIVE KEYS LOADED: {len(VALID_KEYS)} keys ready for rotation.")
+print(f"🔥 ACTIVE KEYS: {len(VALID_KEYS)}")
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash" 
 
 async def generate_with_smart_rotation(content_parts):
     if not VALID_KEYS:
-        raise Exception("No API Keys found in configuration!")
-
+        raise Exception("No API Keys found! Check .env file.")
     shuffled_keys = random.sample(VALID_KEYS, len(VALID_KEYS))
-    last_error = None
-
     for key in shuffled_keys:
         try:
             genai.configure(api_key=key)
             model = genai.GenerativeModel(MODEL_NAME)
             response = await model.generate_content_async(content_parts)
             return response
-        except (ResourceExhausted, ServiceUnavailable) as e:
-            last_error = e
-            continue
         except Exception as e:
-            last_error = e
+            print(f"⚠️ Key Error: {e}")
             continue
+    raise Exception("All keys failed.")
 
-    raise Exception(f"All keys exhausted. Last error: {last_error}")
+def extract_json(text):
+    text = text.replace("```json", "").replace("```xml", "").replace("```", "").strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    return text[start:end] if start != -1 else text
 
-# ... (Class Models เหมือนเดิม)
-class StyleGuide(BaseModel):
-    recommended_colors: List[str]
-    recommended_fonts: List[str]
-    vibe_keywords: List[str]
-
-class AnalysisResult(BaseModel):
-    score: int
-    language_analysis: str
-    suggestions: List[str]
-    style_guide: StyleGuide
-    persona_used: Optional[str] = None
-
-@app.post("/analyze-json", response_model=AnalysisResult)
+@app.post("/analyze-json")
 async def analyze_json(
     file: UploadFile = File(...),
-    country: str = Form(...),
-    device: str = Form(...),
-    context: str = Form(""),
+    country: str = Form("General"),
     industry: str = Form("General"),
-    persona: str = Form("General User")
+    persona: str = Form("General User"),
+    context_description: str = Form("")
 ):
+    print(f"🚀 Analyzing: {country} | Bounding Box Mode")
     try:
-        # ✅ อ่านไฟล์รูป
         image_bytes = await file.read()
+        image = Image.open(io.BytesIO(image_bytes))
         
-        # ✅✅✅ แก้ตรงนี้: ให้ใช้ Mime Type จริงจากไฟล์ที่อัปโหลดมา (เช่น image/png, image/heic)
-        # มือถือชอบส่ง PNG หรือ HEIC มา ถ้าเราบังคับ JPEG มันจะพัง
-        mime_type = file.content_type if file.content_type else "image/jpeg"
-
+        # 🔥 ULTRA HEATMAP PROMPT: บังคับให้สร้าง 40+ จุดและใช้ Bounding Box
         prompt = f"""
-        You are an expert UX/UI Consultant for {country}.
-        Role: {persona}. Industry: {industry}.
-        Analyze the attached UI image (Platform: {device}).
-        Context: "{context}"
+        **ROLE:**
+        You are a World-Class UX Researcher and Eye-Tracking Algorithm Specialist for the **{country}** market.
+        
+        **OBJECTIVE:**
+        Analyze the provided UI screenshot with extreme spatial precision (0-100 coordinate system).
 
-        Output ONLY raw JSON format:
+        **TASK 1: GENERATE DENSE HEATMAP DATA (The "Hotjar" Effect)**
+        - Simulate 3 seconds of user attention.
+        - **Rules:** Users fixate on High Contrast > Faces > Big Numbers > Headlines > CTA Buttons.
+        - **GENERATION STRATEGY:** 1. Identify the Top 3 focus areas (e.g., Main Headline, Hero Image Face, Primary Button).
+          2. For EACH focus area, generate a **CLUSTER of 10-15 points** closely packed around the center (gaussian distribution).
+          3. Add scattered points for secondary elements.
+        - **OUTPUT:** You MUST generate at least **40-50 points** total. 
+        - **INTENSITY:** Core points = 10, Edge of cluster = 5.
+
+        **TASK 2: PRECISE UX AUDIT (Bounding Box Method)**
+        - Identify 3-5 specific visual or cultural flaws.
+        - **SPATIAL PRECISION:** To find (x,y), first imagine a bounding box around the error element.
+        - Return the EXACT CENTER of that bounding box.
+        - **Avoid:** Do not point to empty whitespace. Point to the UI element itself.
+
+        **RESPONSE FORMAT (STRICT JSON ONLY):**
         {{
-            "score": (0-100),
-            "language_analysis": "Critique text in {country} context.",
-            "suggestions": ["suggestion1", "suggestion2", "suggestion3"],
-            "style_guide": {{
-                "recommended_colors": ["#hex"],
-                "recommended_fonts": ["font"],
-                "vibe_keywords": ["keyword"]
-            }}
+            "total_score": (Integer 0-100),
+            "overview": "Professional summary.",
+            "visual_issues": [
+                {{
+                    "description": "Short Title",
+                    "explanation": "Why it's bad.",
+                    "x": (0-100), "y": (0-100) 
+                }}
+            ],
+            "heatmap_points": [
+                {{ "x": (0-100), "y": (0-100), "intensity": (Integer 1-10) }},
+                ... (Generate 40+ points here for dense clusters)
+            ],
+            "suggestions": ["Fix 1", "Fix 2"],
+            "legal_compliance": {{ "gdpr": "Status" }}
         }}
         """
-
-        # ส่ง Mime Type ที่ถูกต้องไปให้ AI
-        response = await generate_with_smart_rotation([
-            {"mime_type": mime_type, "data": image_bytes},
-            prompt
-        ])
         
-        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        start_idx = raw_text.find("{")
-        end_idx = raw_text.rfind("}") + 1
-        json_str = raw_text[start_idx:end_idx] if start_idx != -1 else raw_text
-
-        data = json.loads(json_str)
-        data['persona_used'] = persona 
+        response = await generate_with_smart_rotation([prompt, image])
+        data = json.loads(extract_json(response.text))
         return data
 
     except Exception as e:
-        print(f"🔥 FINAL ERROR: {e}")
+        print(f"🔥 Error: {e}")
         return {
-            "score": 0,
-            "language_analysis": f"Error: {str(e)}",
-            "suggestions": ["Check file format or Server Logs."],
-            "style_guide": {"recommended_colors": [], "recommended_fonts": [], "vibe_keywords": []},
-            "persona_used": persona
+            "total_score": 0, 
+            "overview": f"Error: {str(e)}", 
+            "visual_issues": [], 
+            "heatmap_points": []
         }
+
+@app.post("/fix")
+async def fix_design(file: UploadFile = File(...), country: str = Form(...)):
+    try:
+        image_bytes = await file.read()
+        image = Image.open(io.BytesIO(image_bytes))
+        prompt = f"Redesign UI for {country}. Output raw SVG code only."
+        response = await generate_with_smart_rotation([prompt, image])
+        return {"svg": extract_json(response.text)}
+    except Exception as e:
+        return {"svg": None}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
